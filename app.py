@@ -63,17 +63,62 @@ def extract_raw_xml_text_from_zip(file_bytes) -> str:
 
     return "\n".join(all_extracted_lines)
 
-def normalize_msds_text(text: str) -> str:
-    """Шаг 2: Глубокая нормализация структуры, таблиц и защита от 'see section'"""
+# ... здесь заканчивается extract_raw_xml_text_from_zip ...
+
+def generate_dynamic_glossary(raw_text: str, folder_id: str, api_key: str) -> dict:
+    """Проход 1: Анализирует документ, находит заголовки разделов и просит YandexGPT 
+    создать эталонный JSON-словарь именно для этого файла.
+    """
+    raw_sections = set(re.findall(r'(?im)^[ \t]*(?:section|раздел)\s*\d+.*$', raw_text))
+    if not raw_sections:
+        return {}
+        
+    sections_list = "\n".join(list(raw_sections))
+    client = openai.OpenAI(
+        api_key=api_key,
+        base_url="https://ai.api.cloud.yandex.net/v1",
+        project=folder_id
+    )
+    
+    prompt = (
+        "Ты — AI-модуль нормализации technical документации. Тебе дан список заголовков разделов из оригинального MSDS.\n"
+        "Переведи их на русский язык в соответствии со стандартами химической безопасности.\n\n"
+        "ОБЯЗАТЕЛЬНОЕ ТРЕБОВАНИЕ: Верни ответ СТРОГО в формате валидного JSON-объекта, "
+        "где КЛЮЧ — это оригинальная строка из списка (без изменений), а ЗНАЧЕНИЕ — её эталонный перевод на русский язык.\n"
+        "Не пиши никаких вступлений, комментариев или markdown-разметки (типа ```json). Только чистый JSON.\n\n"
+        f"Список заголовков для перевода:\n{sections_list}"
+    )
+    
+    try:
+        response = client.responses.create(
+            model=f"gpt://{folder_id}/yandexgpt",
+            input=[{"role": "user", "content": prompt}],
+            temperature=0.1
+        )
+        answer = response.output[0].content[0].text.strip()
+        answer = re.sub(r'```(?:json)?\s*|\s*```', '', answer)
+        return json.loads(answer)
+    except Exception as e:
+        st.warning(f"Не удалось построить динамический глоссарий: {e}. Используем стандартную сборку.")
+        return {}
+
+def normalize_msds_with_glossary(text: str, glossary: dict) -> str:
+    """Проход 2: Заменяет оригинальные заголовки по словарю их перевода и схлопывает дубликаты"""
     if not text.strip():
         return ""
     
-    # Схлопываем пробелы
+    for orig_header, ru_header in glossary.items():
+        cleaned_ru = ru_header.strip().lstrip('#').strip()
+        if not cleaned_ru.lower().startswith('раздел'):
+            num_match = re.search(r'\d+', orig_header)
+            if num_match:
+                cleaned_ru = f"РАЗДЕЛ {num_match.group(0)}: {cleaned_ru}"
+                
+        formatted_header = f"\n# {cleaned_ru}\n"
+        text = text.replace(orig_header, formatted_header)
+        
     text = re.sub(r'[ \t]+', ' ', text)
-    # Восстанавливаем пробелы в подразделах (1.1.Product -> 1.1. Product)
     text = re.sub(r'^(\d+\.\d+\.?)([A-Za-zА-Яа-я])', r'\1 \2', text, flags=re.MULTILINE)
-    # Жестко стандартизируем истинные главные разделы в начале строки
-    text = re.sub(r'(?im)^[ \t]*(section|раздел)\s*(\d+)\s*[:.-]*\s*\b', r'\nSECTION \2: ', text)
     
     lines = text.split('\n')
     cleaned_lines = []
@@ -96,13 +141,13 @@ def normalize_msds_text(text: str) -> str:
         
         line_str = re.sub(r':\s*:', ':', line_str)
         
-        is_main_section = bool(re.match(r'^SECTION\s+\d+:', line_str)) and len(line_str) < 120
+        is_main_section = line_str.startswith('# РАЗДЕЛ') or line_str.startswith('# SECTION')
         is_sub_section = bool(re.match(r'^(\d+\.\d+|\d+\.)', line_str)) or line_str.startswith('•') or line_str.startswith('-')
         
         if is_main_section:
-            section_marker = re.match(r'^SECTION\s+\d+', line_str).group(0)
+            section_marker = " ".join(line_str.split()[:3]) 
             if section_marker in seen_sections:
-                continue
+                continue 
             seen_sections.add(section_marker)
             cleaned_lines.append('\n' + line_str)
             continue
@@ -113,7 +158,7 @@ def normalize_msds_text(text: str) -> str:
         if is_sub_section or line_str.endswith(':'):
             cleaned_lines.append('\n' + line_str)
         else:
-            if cleaned_lines and not bool(re.match(r'^\nSECTION\s+\d+:', cleaned_lines[-1])) and not cleaned_lines[-1].endswith(':'):
+            if cleaned_lines and not cleaned_lines[-1].startswith('\n# ') and not cleaned_lines[-1].endswith(':'):
                 prev = cleaned_lines[-1]
                 if line_str not in prev:
                     if "Product form" in line_str or "CAS-No" in line_str or "Product code" in line_str:
@@ -334,19 +379,23 @@ if st.session_state.raw_text:
 st.divider()
 
 # --- ШАГ 2 ---
+# --- Ищи этот блок в районе 220+ строки ---
 st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
 st.caption("Фильтрует дубли, склеивает разорванные ячейки и блокирует ложные переходы по ссылкам.")
 
 if st.button("🔧 Запустить нормализацию текста", type="secondary", use_container_width=True):
     if st.session_state.raw_text:
-        st.session_state.normalized_text = normalize_msds_text(st.session_state.raw_text)
-        st.success("Текст успешно нормализован, очищен от мусора колонтитулов и дублей!")
+        # 1. Сначала под капотом создаем глоссарий под этого конкретного производителя
+        with st.spinner("Анализ документа и построение индивидуального глоссария..."):
+            glossary = generate_dynamic_glossary(st.session_state.raw_text, folder_id, api_key)
+            
+        # 2. Передаем глоссарий в нормализатор структуры
+        with st.spinner("Выравнивание структуры и удаление дубликатов..."):
+            st.session_state.normalized_text = normalize_msds_with_glossary(st.session_state.raw_text, glossary)
+            
+        st.success("Успех! Построен динамический глоссарий, дубликаты разделов полностью уничтожены!")
     else:
         st.warning("Сначала загрузите или вставьте исходный текст на Шаге 1.")
-
-if st.session_state.normalized_text:
-    with st.expander("🛠️ Просмотр нормализованного текста (Шаг 2)", expanded=True):
-        st.text_area("Текст, подготовленный к отправке в YandexGPT:", value=st.session_state.normalized_text, height=250, disabled=True, key="norm_preview")
 
 st.divider()
 
