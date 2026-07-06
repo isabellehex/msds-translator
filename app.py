@@ -63,7 +63,7 @@ def translate_msds_by_chunks(full_text: str, folder_id: str, api_key: str, produ
     retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
     session.mount('https://', HTTPAdapter(max_retries=retries))
     
-    url = "https://llm.api.cloud.yandex.net/foundation/v1/completion"
+    url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     
     headers = {
         "Authorization": f"Api-Key {api_key}",
