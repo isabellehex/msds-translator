@@ -1,244 +1,184 @@
 import streamlit as st
 import openai
+from openai import OpenAI
 import pdfplumber
 import io
 import re
-import os
+import time
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# Настройка страницы
+# 1. Настройка страницы интерфейса
 st.set_page_config(
     page_title="MSDS Yandex AI Studio Pro",
     page_icon="🧪",
     layout="wide"
 )
 
-def translate_msds_with_studio(full_text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """
-    Разбивает любой текст MSDS на аккуратные смысловые куски по объему,
-    переводит их по очереди и склеивает обратно.
-    """
-    # Разбиваем весь текст на отдельные строчки
+# Красивый корпоративный заголовок
+st.title("🧪 MSDS Yandex AI Studio Pro")
+st.caption("Профессиональный облачный перевод паспортов безопасности химической продукции")
+
+# 2. Боковая панель для ввода настроек и ключей
+st.sidebar.header("🔑 Настройки авторизации")
+folder_id = st.sidebar.text_input("Yandex Folder ID", type="password", help="Введите идентификатор вашего каталога в Yandex Cloud")
+api_key = st.sidebar.text_input("Yandex API Key", type="password", help="Введите ваш секретный API-ключ")
+
+st.sidebar.markdown("---")
+st.sidebar.header("📝 Параметры перевода")
+product_name_ru = st.sidebar.text_input("Название продукта на русском", value="Триметилолпропан", help="Как называть вещество в итоговом переводе")
+
+# 3. Функция умного перевода по частям (решает проблему пропуска разделов)
+def translate_msds_by_chunks(full_text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
+    # Разбиваем исходный текст на строки
     lines = full_text.split('\n')
     
     chunks = []
     current_chunk = []
     current_length = 0
     
-    # Задаем лимит: примерно 3000 символов на один запрос (это безопасно для вывода)
-    max_chunk_size = 3000 
+    # Оптимальный размер куска — около 3500 символов, чтобы ИИ выдавал полный перевод без урезаний
+    max_chunk_size = 3500 
     
     for line in lines:
         current_chunk.append(line)
-        current_length += len(line) + 1  # +1 для символа переноса строки
-        
-        # Если набрали критическую массу — сохраняем кусок и начинаем новый
+        current_length += len(line) + 1
         if current_length > max_chunk_size:
             chunks.append("\n".join(current_chunk))
             current_chunk = []
             current_length = 0
             
-    # Не забываем забрать остаток текста, если он есть
     if current_chunk:
         chunks.append("\n".join(current_chunk))
         
     translated_parts = []
     total_chunks = len(chunks)
     
-    st.info(f"Документ успешно разделен на {total_chunks} частей для гарантированного перевода.")
+    st.info(f"📋 Документ успешно разделен на {total_chunks} части для гарантированного перевода всех разделов.")
     
-    # Переводим каждый кусок по очереди
+    # Подключаем клиент OpenAI, настроенный на шлюз Яндекса
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://llm.api.cloud.yandex.net/v1/openai"
+    )
+    
+    # Поочередно отправляем каждый кусок в нейросеть
     for i, chunk in enumerate(chunks, 1):
-        st.write(f"Переводим часть {i} из {total_chunks}...")
+        st.write(f"⏳ Переводим часть {i} из {total_chunks}...")
         
-        prompt = f"""Ты — профессиональный химик-технолог и переводчик. 
+        prompt = f"""Ты — профессиональный химик-технолог, эксперт по техническому регулированию и переводчик. 
 Переведи предоставленный фрагмент паспорта безопасности (MSDS) вещества {product_name_ru} на русский язык.
 Переводи строго, сохраняй структуру, числовые данные, таблицы, аббревиатуры и оригинальные CAS-номера.
-Не сокращай текст, не убирай технические данные и не пиши никаких вступлений от себя — только чистый перевод текста.
+Не сокращай текст, не убирай технические данные, показатели и не пиши никаких вступлений от себя — выдай только чистый перевод текста фрагмента.
 
 ФРАГМЕНТ ДЛЯ ПЕРЕВОДА:
 {chunk}"""
 
         try:
-            # Создаем экземпляр клиента прямо внутри цикла, используя переданные в функцию api_key и folder_id
-            # Если вы используете Yandex API, совместимый с OpenAI, то base_url обычно такой:
-            from openai import OpenAI
-            
-            client = OpenAI(
-                api_key=api_key,                                # Передаем твой ключ из интерфейса
-                base_url="https://llm.api.cloud.yandex.net/v1/openai" # Или ваш рабочий эндпоинт
-            )
-            
-            # А теперь делаем сам запрос через этот client:
+            # Делаем запрос с обязательной передачей x-folder-id в заголовках для Яндекса
             response = client.chat.completions.create(
-                model="yandexgpt/latest", # твоя рабочая модель (например, yandexgpt или gpt-4o)
+                model="yandexgpt/latest", 
                 messages=[{"role": "user", "content": prompt}],
-                # Если для Яндекса нужен x-folder-id в заголовках, раскомментируй строчку ниже:
-                # extra_headers={"x-folder-id": folder_id} 
+                extra_headers={"x-folder-id": folder_id}
             )
             
             chunk_translation = response.choices[0].message.content
             translated_parts.append(chunk_translation)
+            
+            # Небольшая пауза в 1.5 секунды, чтобы сервера Яндекса не обрывали соединение по таймауту
+            time.sleep(1.5)
+            
         except Exception as e:
             st.error(f"Ошибка при переводе части {i}: {e}")
-            translated_parts.append(f"\n[Ошибка перевода части {i}]\n")
+            translated_parts.append(f"\n[Ошибка перевода части {i}. Технические детали: {str(e)}]\n")
             
-    # Соединяем все части в единый итоговый текст
-    full_translation = "\n\n".join(translated_parts)
-    return full_translation
+    # Собираем все переведенные части воедино
+    return "\n\n".join(translated_parts)
 
-def make_formatted_docx(markdown_text: str, product_name_ru: str):
-    """Сборщик Word-документа с интеграцией официального названия в колонтитулы"""
+# 4. Функция генерации красивого Word-документа (.docx)
+def create_word_document(translated_text: str) -> io.BytesIO:
     doc = Document()
     
-    # Конфигурация страницы (Узкие поля 1 см)
-    for section in doc.sections:
-        section.top_margin = Inches(0.39)
-        section.bottom_margin = Inches(0.39)
-        section.left_margin = Inches(0.39)
-        section.right_margin = Inches(0.39)
-        
-        # Верхний колонтитул
-        hp = section.header.paragraphs[0]
-        hp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        hrun = hp.add_run(f"{product_name_ru} | Паспорт безопасности химической продукции")
-        hrun.font.name = 'Arial'
-        hrun.font.size = Pt(8.5)
-        hrun.font.italic = True
-        hrun.font.color.rgb = RGBColor(128, 128, 128)
-        
-        # Нижний колонтитул
-        fp = section.footer.paragraphs[0]
-        fp.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        frun = fp.add_run("www.spanlab.in                                                                                  ")
-        frun.font.name = 'Arial'
-        frun.font.size = Pt(8.5)
-        frun.font.color.rgb = RGBColor(128, 128, 128)
-        
-        fpage = fp.add_run("Страница [Page]")
-        fpage.font.name = 'Arial'
-        fpage.font.size = Pt(8.5)
-        fpage.font.color.rgb = RGBColor(128, 128, 128)
-
-    DARK_BLUE = RGBColor(0, 51, 102)
+    # Настройки стилей страницы (шрифт Arial, размер 11)
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Arial'
+    font.size = Pt(11)
     
-    lines = markdown_text.split('\n')
+    # Читаем текст построчно для красивой верстки заголовков
+    paragraphs = translated_text.split('\n')
     
-    for line in lines:
-        cleaned_line = line.strip()
-        if not cleaned_line:
+    for p_text in paragraphs:
+        p_text = p_text.strip()
+        if not p_text:
             continue
             
         p = doc.add_paragraph()
-        p.paragraph_format.space_after = Pt(4)
-        p.paragraph_format.line_spacing = 1.15
         
-        if cleaned_line.startswith('# '):
-            text_content = cleaned_line.replace('# ', '').strip()
-            run = p.add_run(text_content)
-            run.bold = True
-            run.font.name = 'Arial'
-            run.font.size = Pt(12)
-            run.font.color.rgb = DARK_BLUE
+        # Если строка выглядит как заголовок раздела (например, РАЗДЕЛ, SECTION или Номер раздела)
+        if re.match(r'^(SECTION|РАЗДЕЛ|\d+\.\s+)', p_text, re.IGNORECASE):
             p.paragraph_format.space_before = Pt(12)
             p.paragraph_format.space_after = Pt(6)
-            
-        elif cleaned_line.startswith('## '):
-            text_content = cleaned_line.replace('## ', '').strip()
-            run = p.add_run(text_content)
-            run.font.name = 'Arial'
-            run.font.size = Pt(11)
-            run.font.color.rgb = DARK_BLUE
-            p.paragraph_format.space_before = Pt(6)
-            
+            run = p.add_run(p_text)
+            run.bold = True
+            run.font.size = Pt(13)
+            run.font.color.rgb = RGBColor(0, 102, 51) # Красивый строгий темно-зеленый цвет для структуры
         else:
-            if cleaned_line.startswith('- '):
-                cleaned_line = cleaned_line.replace('- ', '', 1)
-                p.paragraph_format.left_indent = Inches(0.25)
+            # Обычный текст
+            p.paragraph_format.space_after = Pt(4)
+            p.paragraph_format.line_spacing = 1.15
+            p.add_run(p_text)
             
-            parts = re.split(r'(\*\*.*?\*\*)', cleaned_line)
-            
-            for part in parts:
-                if part.startswith('**') and part.endswith('**'):
-                    bold_text = part.replace('**', '')
-                    run = p.add_run(bold_text)
-                    run.bold = True
-                else:
-                    run = p.add_run(part)
-                
-                run.font.name = 'Arial'
-                run.font.size = Pt(9)
-                
-    bio = io.BytesIO()
-    doc.save(bio)
-    bio.seek(0)
-    return bio
+    # Сохраняем файл в виртуальную память, чтобы выдать пользователю
+    file_stream = io.BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+    return file_stream
 
-# --- Интерфейс Streamlit ---
-st.title("🧪 MSDS Translator — Premium AI Studio")
-st.caption("Высокоструктурированный перевод паспортов химической безопасности с фиксацией номенклатуры.")
+# 5. Главный экран приложения
+uploaded_file = st.file_uploader("Шаг 1: Загрузите оригинальный паспорт безопасности (PDF)", type=["pdf"])
 
-st.divider()
-
-st.sidebar.header("Доступ к Yandex AI Studio")
-folder_id = st.sidebar.text_input("Yandex Folder ID", type="password")
-api_key = st.sidebar.text_input("Yandex API Key", type="password")
-
-st.sidebar.markdown("---")
-st.sidebar.header("Химическая номенклатура")
-# Изменили поле по твоему запросу
-product_name_ru = st.sidebar.text_input("Официальное название продукта (RU):", value="ТРИМЕТИЛОЛПРОПАН")
-
-col1, col2 = st.columns(2)
-source_text = ""
-file_name_output = "MSDS_RU_Translated"
-
-with col1:
-    st.subheader("Исходный документ (EN)")
-    input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / PDF / TXT)", "Вставить текст вручную"))
+if uploaded_file is not None:
+    st.success("Файл успешно загружен!")
     
-    if input_method == "Вставить текст вручную":
-        source_text = st.text_area("Вставьте текст MSDS на английском языке:", height=450, placeholder="SECTION 1: Identification...")
-    else:
-        uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
-        if uploaded_file is not None:
-            file_name_output = f"{uploaded_file.name}_RU"
+    # Кнопка запуска процесса
+    if st.button("Шаг 2: Запустить перевод", type="primary"):
+        if not folder_id or not api_key:
+            st.error("❌ Пожалуйста, заполните Yandex Folder ID и API Key в левой боковой панели!")
+        else:
+            with st.spinner("Считываем текст из PDF..."):
+                try:
+                    # Извлекаем текст из PDF с помощью pdfplumber
+                    with pdfplumber.open(uploaded_file) as pdf:
+                        full_text = ""
+                        for page in pdf.pages:
+                            text = page.extract_text()
+                            if text:
+                                full_text += text + "\n"
+                except Exception as e:
+                    st.error(f"Не удалось прочитать PDF-файл: {e}")
+                    full_text = None
             
-            if uploaded_file.name.endswith(".txt"):
-                source_text = str(uploaded_file.read(), "utf-8")
-            elif uploaded_file.name.endswith(".docx"):
-                doc = Document(io.BytesIO(uploaded_file.read()))
-                source_text = "\n".join([para.text for para in doc.paragraphs])
-            elif uploaded_file.name.endswith(".pdf"):
-                with pdfplumber.open(io.BytesIO(uploaded_file.read())) as pdf:
-                    source_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-            
-            st.text_area("Предпросмотр оригинального текста:", value=source_text, height=300, disabled=True)
-
-if st.button("Выполнить перевод и форматирование", type="primary", use_container_width=True):
-    if not folder_id or not api_key:
-        st.warning("Пожалуйста, введите Yandex Folder ID и API Key.")
-    elif source_text.strip():
-        with col2:
-            st.subheader("Осмысленный перевод (Markdown Preview)")
-            
-            # Передаем зафиксированное название в функцию перевода
-            translated_result = translate_msds_with_studio(source_text, folder_id, api_key, product_name_ru)
-            
-            st.markdown(translated_result)
-            
-            if "Ошибка" not in translated_result:
-                # Генерируем Word с тем же зафиксированным названием
-                docx_data = make_formatted_docx(translated_result, product_name_ru)
+            if full_text:
+                # Запускаем наш новый разделенный перевод
+                translated_result = translate_msds_by_chunks(full_text, folder_id, api_key, product_name_ru)
                 
+                st.markdown("---")
+                st.success("🎉 Перевод успешно завершен!")
+                
+                # Показываем превью перевода на экране
+                with st.expander("👀 Посмотреть превью перевода прямо на сайте"):
+                    st.markdown(translated_result)
+                
+                # Создаем Word файл
+                with st.spinner("Формируем документ Word..."):
+                    word_file = create_word_document(translated_result)
+                
+                # Кнопка скачивания готового документа
                 st.download_button(
-                    label="Скачать отформатированный файл WORD (.docx)",
-                    data=docx_data,
-                    file_name=file_name_output if file_name_output.endswith(".docx") else f"{file_name_output}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
+                    label="📥 Скачать готовый перевод (.docx)",
+                    data=word_file,
+                    file_name=f"MSDS_{product_name_ru}_RU.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-    else:
-        st.warning("Пожалуйста, добавьте текст или загрузите файл перед переводом.")
