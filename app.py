@@ -62,11 +62,23 @@ def translate_msds_with_studio(full_text: str, folder_id: str, api_key: str, pro
 {chunk}"""
 
         try:
-            # Твой стандартный запрос к API (замени на свой рабочий вызов, если он отличается)
-            response = openai.chat.completions.create(
-                model="yandexgpt/latest", 
-                messages=[{"role": "user", "content": prompt}]
+            # Создаем экземпляр клиента прямо внутри цикла, используя переданные в функцию api_key и folder_id
+            # Если вы используете Yandex API, совместимый с OpenAI, то base_url обычно такой:
+            from openai import OpenAI
+            
+            client = OpenAI(
+                api_key=api_key,                                # Передаем твой ключ из интерфейса
+                base_url="https://llm.api.cloud.yandex.net/v1/openai" # Или ваш рабочий эндпоинт
             )
+            
+            # А теперь делаем сам запрос через этот client:
+            response = client.chat.completions.create(
+                model="yandexgpt/latest", # твоя рабочая модель (например, yandexgpt или gpt-4o)
+                messages=[{"role": "user", "content": prompt}],
+                # Если для Яндекса нужен x-folder-id в заголовках, раскомментируй строчку ниже:
+                # extra_headers={"x-folder-id": folder_id} 
+            )
+            
             chunk_translation = response.choices[0].message.content
             translated_parts.append(chunk_translation)
         except Exception as e:
