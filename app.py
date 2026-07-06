@@ -259,14 +259,15 @@ def reset_state():
 
 # --- ШАГ 1 ---
 st.header("Шаг 1: Загрузка исходного MSDS (EN)")
-input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / TXT)", "Вставить текст вручную"), on_change=reset_state)
+input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / PDF / TXT)", "Вставить текст вручную"), on_change=reset_state)
 
 if input_method == "Вставить текст вручную":
     inserted_text = st.text_area("Вставьте текст MSDS на английском языке:", height=250, placeholder="SECTION 1: Identification...")
     if inserted_text:
         st.session_state.raw_text = inserted_text
 else:
-    uploaded_file = st.file_uploader("Выберите файл", type=["docx", "txt"])
+    # Вернули поддержку PDF обратно в список доступных форматов
+    uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
     if uploaded_file is not None:
         st.session_state.file_name_output = f"Translated_{uploaded_file.name}"
         if uploaded_file.name.endswith(".txt"):
@@ -274,6 +275,9 @@ else:
         elif uploaded_file.name.endswith(".docx"):
             doc = Document(io.BytesIO(uploaded_file.read()))
             st.session_state.raw_text = "\n".join([para.text for para in doc.paragraphs])
+        elif uploaded_file.name.endswith(".pdf"):
+            with pdfplumber.open(io.BytesIO(uploaded_file.read())) as pdf:
+                st.session_state.raw_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
 
 if st.session_state.raw_text:
     with st.expander("🔍 Просмотр оригинального текста (Шаг 1)", expanded=True):
