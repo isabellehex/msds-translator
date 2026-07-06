@@ -246,15 +246,21 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     progress_bar.empty()
     return '\n\n'.join(translated_blocks)
 
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+
 def make_formatted_docx(markdown_text: str, product_name_ru: str):
-    """Шаг 4: Сборщик Word-документа по ГОСТ-стилистике"""
+    """Шаг 4: Сборщик Word-документа по ГОСТ-стилистике с премиум-шапкой"""
     doc = Document()
+    
+    # 1. Настройка полей
     for section in doc.sections:
         section.top_margin = Inches(0.39)
         section.bottom_margin = Inches(0.39)
         section.left_margin = Inches(0.39)
         section.right_margin = Inches(0.39)
         
+        # Верхний колонтитул
         hp = section.header.paragraphs[0]
         hp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         hrun = hp.add_run(f"{product_name_ru} | Паспорт безопасности химической продукции")
@@ -263,6 +269,7 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
         hrun.font.italic = True
         hrun.font.color.rgb = RGBColor(128, 128, 128)
         
+        # Нижний колонтитул
         fp = section.footer.paragraphs[0]
         fp.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         frun = fp.add_run("www.spanlab.in                                                                                  ")
@@ -275,6 +282,56 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
         fpage.font.size = Pt(8.5)
         fpage.font.color.rgb = RGBColor(128, 128, 128)
 
+    # --- ДОБАВЛЕНИЕ ПРЕМИУМ-ШАПКИ ДОКУМЕНТА ---
+    
+    # Пытаемся выудить CAS-номер из нормализованного текста для автоматической подстановки
+    cas_match = re.search(r'(?:CAS[-_ ]No|CAS|КАС)[.:\s]*([\d-]+)', markdown_text, re.IGNORECASE)
+    cas_number = cas_match.group(1) if cas_match else "—"
+
+    # Строка 1: Паспорт безопасности материала
+    p_header1 = doc.add_paragraph()
+    p_header1.paragraph_format.space_before = Pt(0)
+    p_header1.paragraph_format.space_after = Pt(2)
+    run_h1 = p_header1.add_run("Паспорт безопасности материала")
+    run_h1.bold = True
+    run_h1.font.name = 'Arial'
+    run_h1.font.size = Pt(16)
+    run_h1.font.color.rgb = RGBColor(0, 0, 0)
+
+    # Строка 2: Название продукта
+    p_header2 = doc.add_paragraph()
+    p_header2.paragraph_format.space_before = Pt(0)
+    p_header2.paragraph_format.space_after = Pt(2)
+    run_h2 = p_header2.add_run(product_name_ru)
+    run_h2.bold = True
+    run_h2.font.name = 'Arial'
+    run_h2.font.size = Pt(16)
+    run_h2.font.color.rgb = RGBColor(0, 0, 0)
+
+    # Строка 3: CAS № + Элегантная черная линия снизу абзаца
+    p_header3 = doc.add_paragraph()
+    p_header3.paragraph_format.space_before = Pt(0)
+    p_header3.paragraph_format.space_after = Pt(18) # Отступ после линии до основного текста
+    run_h3 = p_header3.add_run(f"CAS № {cas_number}")
+    run_h3.bold = True
+    run_h3.font.name = 'Arial'
+    run_h3.font.size = Pt(16)
+    run_h3.font.color.rgb = RGBColor(0, 0, 0)
+
+    # Магия XML: добавляем тонкую черную горизонтальную линию под третьим абзацем шапки
+    pPr = p_header3._p.get_or_add_pPr()
+    pBdr = OxmlElement('w:pBdr')
+    bottom = OxmlElement('w:bottom')
+    bottom.set(qn('w:val'), 'single') # Сплошная линия
+    bottom.set(qn('w:sz'), '6')       # Толщина (6 = 0.75 pt, тонкая и аккуратная)
+    bottom.set(qn('w:space'), '8')    # Расстояние от текста до линии
+    bottom.set(qn('w:color'), '000000') # Черный цвет
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+    # --- КОНЕЦ ШАПКИ ---
+
+    # 2. Сборка основного контента
     DARK_BLUE = RGBColor(0, 51, 102)
     lines = markdown_text.split('\n')
     
