@@ -16,18 +16,17 @@ st.set_page_config(
 )
 
 def normalize_msds_text(text: str) -> str:
-    """Шаг 2: Нормализация и очистка 'рваного' текста из таблиц и фигур Word"""
+    """Шаг 2: Нормализация текста с защитой от ложных разделов (ссылок вида see section 16)"""
     if not text.strip():
         return ""
     
     # 1. Заменяем множественные пробелы и горизонтальные табы на один пробел
     text = re.sub(r'[ \t]+', ' ', text)
     
-    # 2. Стандартизируем заголовки разделов (убираем лишние пробелы вокруг цифр)
-    # Приводим к единому виду: SECTION X: Название
-    text = re.sub(r'(?i)\b(section|раздел)\s*[:._-]?\s*(\d+)', r'\nSECTION \2: ', text)
+    # 2. Стандартизируем ТОЛЬКО реальные заголовки разделов (когда SECTION стоит в начале строки)
+    # Игнорируем упоминания внутри предложений (например, "see section 13")
+    text = re.sub(r'(?im)^[ \t]*(section|раздел)\s*(\d+)\b', r'\nSECTION \2: ', text)
     
-    # Разбираем текст построчно для склейки разорванных табличных строк
     lines = text.split('\n')
     cleaned_lines = []
     
@@ -36,31 +35,32 @@ def normalize_msds_text(text: str) -> str:
         if not line_str:
             continue
             
-        # Если строка — очевидный заголовок или пункт списка/подраздела, оставляем её отдельно
-        is_structural = (
-            line_str.startswith('SECTION') or 
-            bool(re.match(r'^(\d+\.\d+|\d+\.)', line_str)) or 
-            line_str.startswith('-') or
-            line_str.endswith(':')
-        )
+        # Строка признается заголовком раздела, только если она начинается строго с SECTION [цифра]:
+        # и она относительно короткая (заголовок не бывает длиной во весь абзац)
+        is_main_section = bool(re.match(r'^SECTION\s+\d+:', line_str)) and len(line_str) < 120
+        
+        # Проверка на подразделы (1.1, 2.3 и т.д.) или пункты списков
+        is_sub_section = bool(re.match(r'^(\d+\.\d+|\d+\.)', line_str)) or line_str.startswith('-')
+        
+        is_structural = is_main_section or is_sub_section or line_str.endswith(':')
         
         if is_structural:
-            cleaned_lines.append('\n' + line_str)  # Отделяем структурные элементы пустой строкой
+            cleaned_lines.append('\n' + line_str)  # Выделяем структуру
         else:
-            # Если предыдущая строка не заголовок, склеиваем текущую с предыдущей через пробел
-            if cleaned_lines and not cleaned_lines[-1].startswith('\nSECTION') and not cleaned_lines[-1].endswith(':'):
+            # Если это обычный текст, и предыдущая строка не была главным заголовком раздела,
+            # склеиваем её с предыдущей (лечим разрывы таблиц)
+            if cleaned_lines and not bool(re.match(r'^\nSECTION\s+\d+:', cleaned_lines[-1])) and not cleaned_lines[-1].endswith(':'):
                 cleaned_lines[-1] = cleaned_lines[-1] + " " + line_str
             else:
                 cleaned_lines.append(line_str)
                 
-    # Собираем обратно и убираем дублирующиеся пустые строки
     normalized = '\n'.join(cleaned_lines)
     normalized = re.sub(r'\n\s*\n+', '\n\n', normalized)
     
     return normalized.strip()
 
 def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """Шаг 3: Интеллектуальный перевод MSDS с разбивкой строго по строкам/секциям"""
+    """Шаг 3: Перевод MSDS с жестким контролем деления блоков по истинным SECTION"""
     if not text.strip():
         return ""
     
@@ -72,7 +72,6 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     
     YANDEX_MODEL = "yandexgpt" 
     
-    # Нарезка текста на блоки с контролем ключевых слов SECTION
     lines = text.split('\n')
     blocks = []
     current_block = []
@@ -81,10 +80,9 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     for line in lines:
         cleaned_line = line.strip()
         
-        # Проверяем, начинается ли строка с SECTION (после нашей нормализации они все стандартизированы)
-        is_new_section = cleaned_line.startswith('SECTION')
+        # Блок закрывается ТОЛЬКО если мы встретили истинный заголовок "SECTION [цифра]:"
+        is_new_section = bool(re.match(r'^SECTION\s+\d+:', cleaned_line))
         
-        # Если встретили новый РАЗДЕЛ или текущий блок уже слишком большой, сохраняем его
         if (is_new_section and current_block) or current_length > 2500:
             blocks.append('\n'.join(current_block))
             current_block = []
@@ -99,7 +97,6 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     blocks = [b.strip() for b in blocks if b.strip()]
     translated_blocks = []
     
-    # ЖЕСТКИЙ ПРОМПТ С ДИРЕКТИВОЙ ПО НАЗВАНИЮ ПРОДУКТА
     system_instruction = (
         "Ты — высококлассный технический переводчик и эксперт по химической безопасности. "
         "Твоя задача — перевести фрагмент MSDS на русский язык (ГОСТ 30333-2022) и ОФОРМИТЬ ЕГО В СТРОГОМ MARKDOWN.\n\n"
@@ -130,7 +127,7 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
                 instructions=system_instruction,
                 input=[{"role": "user", "content": block}],
                 temperature=0.1, 
-                max_output_tokens=4000  # С запасом под большие таблицы разделов 8, 9, 10
+                max_output_tokens=4000  
             )
             
             if response.output and response.output[0].content and response.output[0].content[0].text:
@@ -152,14 +149,12 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
     """Шаг 4: Сборщик Word-документа с интеграцией официального названия в колонтитулы"""
     doc = Document()
     
-    # Конфигурация страницы (Узкие поля 1 см)
     for section in doc.sections:
         section.top_margin = Inches(0.39)
         section.bottom_margin = Inches(0.39)
         section.left_margin = Inches(0.39)
         section.right_margin = Inches(0.39)
         
-        # Верхний колонтитул
         hp = section.header.paragraphs[0]
         hp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         hrun = hp.add_run(f"{product_name_ru} | Паспорт безопасности химической продукции")
@@ -168,7 +163,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
         hrun.font.italic = True
         hrun.font.color.rgb = RGBColor(128, 128, 128)
         
-        # Нижний колонтитул
         fp = section.footer.paragraphs[0]
         fp.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         frun = fp.add_run("www.spanlab.in                                                                                  ")
@@ -237,7 +231,7 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
 
 # --- Интерфейс Streamlit ---
 st.title("🧪 MSDS Translator — Premium AI Studio")
-st.caption("Пошаговый конвейер: контроль структуры и интеллектуальный перевод паспортов безопасности.")
+st.caption("Пошаговый конвейер с фильтрацией ложных разделов и перекрестных ссылок.")
 
 st.divider()
 
@@ -249,7 +243,6 @@ st.sidebar.markdown("---")
 st.sidebar.header("📦 Химическая номенклатура")
 product_name_ru = st.sidebar.text_input("Официальное название продукта (RU):", value="ТРИМЕТИЛОЛПРОПАН")
 
-# Инициализация хранилища состояний (Session State)
 if "raw_text" not in st.session_state:
     st.session_state.raw_text = ""
 if "normalized_text" not in st.session_state:
@@ -259,13 +252,12 @@ if "translated_text" not in st.session_state:
 if "file_name_output" not in st.session_state:
     st.session_state.file_name_output = "MSDS_RU_Translated"
 
-# Очистка состояний при смене способа загрузки данных
 def reset_state():
     st.session_state.raw_text = ""
     st.session_state.normalized_text = ""
     st.session_state.translated_text = ""
 
-# --- ШАГ 1: Загрузка или ввод данных ---
+# --- ШАГ 1 ---
 st.header("Шаг 1: Загрузка исходного MSDS (EN)")
 input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / TXT)", "Вставить текст вручную"), on_change=reset_state)
 
@@ -289,9 +281,9 @@ if st.session_state.raw_text:
 
 st.divider()
 
-# --- ШАГ 2: Нормализация структуры ---
+# --- ШАГ 2 ---
 st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
-st.caption("Склеивает разорванные строки таблиц, удаляет скрытый мусор и выравнивает маркеры SECTION.")
+st.caption("Склеивает таблицы, защищая ссылки вида 'see section 16' от превращения в новые разделы.")
 
 if st.button("🔧 Запустить нормализацию текста", type="secondary", use_container_width=True):
     if st.session_state.raw_text:
@@ -302,24 +294,24 @@ if st.button("🔧 Запустить нормализацию текста", ty
 
 if st.session_state.normalized_text:
     with st.expander("🛠️ Просмотр нормализованного текста (Шаг 2)", expanded=True):
-        st.text_area("Текст, готовый к отправке в нейросеть:", value=st.session_state.normalized_text, height=250, disabled=True, key="norm_preview")
+        st.text_area("Текст, готовый к отправке в нейросеть (проверьте отсутствие ложных SECTION):", value=st.session_state.normalized_text, height=250, disabled=True, key="norm_preview")
 
 st.divider()
 
-# --- ШАГ 3: Интеллектуальный перевод ---
+# --- ШАГ 3 ---
 st.header("Шаг 3: Перевод через YandexGPT")
 
 if st.button("🔄 Выполнить перевод (строго по секциям)", type="primary", use_container_width=True):
     if not folder_id or not api_key:
         st.warning("Пожалуйста, введите Yandex Folder ID и API Key в боковой панели.")
     elif st.session_state.normalized_text:
-        with st.spinner("YandexGPT переводит документ секция за секцией... Пожалуйста, подождите."):
+        with st.spinner("YandexGPT переводит документ..."):
             st.session_state.translated_text = translate_msds_with_studio(
                 st.session_state.normalized_text, folder_id, api_key, product_name_ru
             )
         st.success("Перевод завершен!")
     else:
-        st.warning("Нечего переводить. Сначала выполните Шаг 2 (Нормализация).")
+        st.warning("Нечего переводить. Сначала выполните Шаг 2.")
 
 if st.session_state.translated_text:
     with st.expander("📄 Предпросмотр готового перевода Markdown (Шаг 3)", expanded=True):
@@ -327,13 +319,12 @@ if st.session_state.translated_text:
 
 st.divider()
 
-# --- ШАГ 4: Сборка DOCX файла и скачивание ---
+# --- ШАГ 4 ---
 st.header("Шаг 4: Экспорт в Word")
 
 if st.session_state.translated_text:
     if "Ошибка" not in st.session_state.translated_text:
         docx_data = make_formatted_docx(st.session_state.translated_text, product_name_ru)
-        
         st.download_button(
             label="💾 Скачать отформатированный файл WORD (.docx)",
             data=docx_data,
@@ -342,4 +333,4 @@ if st.session_state.translated_text:
             use_container_width=True
         )
 else:
-    st.info("Кнопка скачивания появится здесь, когда Шаг 3 (Перевод) будет успешно выполнен.")
+    st.info("Кнопка скачивания появится здесь, когда Шаг 3 будет успешно выполнен.")
