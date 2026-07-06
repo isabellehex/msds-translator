@@ -31,15 +31,16 @@ product_name_ru = st.sidebar.text_input("Название продукта на 
 
 # 3. Функция умного перевода по частям (решает проблему пропуска разделов)
 def translate_msds_by_chunks(full_text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    # Разбиваем исходный текст на строки
-    lines = full_text.split('\n')
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util import Retry
     
+    # Разбиваем текст на строки
+    lines = full_text.split('\n')
     chunks = []
     current_chunk = []
     current_length = 0
-    
-    # Оптимальный размер куска — около 3500 символов, чтобы ИИ выдавал полный перевод без урезаний
-    max_chunk_size = 3500 
+    max_chunk_size = 3000 # Немного уменьшим размер куска для надежности
     
     for line in lines:
         current_chunk.append(line)
@@ -48,22 +49,29 @@ def translate_msds_by_chunks(full_text: str, folder_id: str, api_key: str, produ
             chunks.append("\n".join(current_chunk))
             current_chunk = []
             current_length = 0
-            
     if current_chunk:
         chunks.append("\n".join(current_chunk))
         
     translated_parts = []
     total_chunks = len(chunks)
     
-    st.info(f"📋 Документ успешно разделен на {total_chunks} части для гарантированного перевода всех разделов.")
+    st.info(f"📋 Документ успешно разделен на {total_chunks} части для гарантированного перевода.")
     
-    # Подключаем клиент OpenAI, настроенный на шлюз Яндекса
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://llm.api.cloud.yandex.net/v1/openai"
-    )
+    # --- НАСТРОЙКА БРОНЕБОЙНОЙ СЕТЕВОЙ СЕССИИ ---
+    session = requests.Session()
+    # Если соединение оборвется, код автоматически повторит попытку до 5 раз с увеличивающейся паузой
+    retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+    session.mount('https://', HTTPAdapter(max_retries=retries))
     
-    # Поочередно отправляем каждый кусок в нейросеть
+    url = "https://llm.api.cloud.yandex.net/foundation/v1/completion"
+    
+    headers = {
+        "Authorization": f"Api-Key {api_key}",
+        "x-folder-id": folder_id,
+        "Content-Type": "application/json"
+    }
+    # --------------------------------------------
+    
     for i, chunk in enumerate(chunks, 1):
         st.write(f"⏳ Переводим часть {i} из {total_chunks}...")
         
@@ -75,25 +83,42 @@ def translate_msds_by_chunks(full_text: str, folder_id: str, api_key: str, produ
 ФРАГМЕНТ ДЛЯ ПЕРЕВОДА:
 {chunk}"""
 
+        # Структура запроса напрямую к Yandex GPT
+        data = {
+            "modelUri": f"gpt://{folder_id}/yandexgpt/latest",
+            "completionOptions": {
+                "stream": False,
+                "temperature": 0.1, # Низкая температура для максимальной строгости перевода
+                "maxTokens": "4000"
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "text": prompt
+                }
+            ]
+        }
+
         try:
-            # Делаем запрос с обязательной передачей x-folder-id в заголовках для Яндекса
-            response = client.chat.completions.create(
-                model="yandexgpt/latest", 
-                messages=[{"role": "user", "content": prompt}],
-                extra_headers={"x-folder-id": folder_id}
-            )
+            # Отправляем прямой POST-запрос с таймаутом ожидания в 60 секунд
+            response = session.post(url, headers=headers, json=data, timeout=60)
             
-            chunk_translation = response.choices[0].message.content
+            # Если Яндекс ответил ошибкой (например, 401 или 403) — сработает исключение
+            response.raise_for_status()
+            
+            # Вытаскиваем текст перевода из ответа Яндекса
+            result_json = response.json()
+            chunk_translation = result_json["result"]["alternatives"][0]["message"]["text"]
+            
             translated_parts.append(chunk_translation)
             
-            # Небольшая пауза в 1.5 секунды, чтобы сервера Яндекса не обрывали соединение по таймауту
-            time.sleep(1.5)
+            # Обязательная пауза между частями
+            time.sleep(2.0)
             
         except Exception as e:
             st.error(f"Ошибка при переводе части {i}: {e}")
             translated_parts.append(f"\n[Ошибка перевода части {i}. Технические детали: {str(e)}]\n")
             
-    # Собираем все переведенные части воедино
     return "\n\n".join(translated_parts)
 
 # 4. Функция генерации красивого Word-документа (.docx)
