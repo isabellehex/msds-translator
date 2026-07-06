@@ -8,18 +8,6 @@ from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# --- Автоматический туннель для коллег ---
-@st.cache_resource
-def start_network_tunnel():
-    """Запускает безопасный публичный туннель для коллег без прав админа"""
-    try:
-        import ngrok
-        # Создаем бесплатный туннель на порт Streamlit (8501)
-        listener = ngrok.forward(8501, authtoken_from_env=False)
-        return listener.url()
-    except Exception as e:
-        return f"Не удалось запустить туннель автоматически: {e}"
-
 # Настройка страницы
 st.set_page_config(
     page_title="MSDS Yandex AI Studio Pro",
@@ -27,14 +15,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Пытаемся открыть доступ коллегам
-public_url = start_network_tunnel()
-
-# Выводим секретную ссылку в боковую панель, чтобы ты могла её скопировать
-st.sidebar.success("🔗 Ссылка для коллег:")
-st.sidebar.code(public_url, language="text")
-st.sidebar.caption("Скопируй эту ссылку и отправь коллегам в чат. Она работает без прав админа!")
-st.sidebar.markdown("---")
 def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
     """Перевод MSDS с жестким требованием разметки Markdown и фиксированным именем продукта"""
     if not text.strip():
