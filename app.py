@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """Перевод MSDS с разбивкой строго по РАЗДЕЛАМ (SECTION)"""
+    """Перевод MSDS с умной разбивкой по строкам, реагирующей на SECTION"""
     if not text.strip():
         return ""
     
@@ -28,29 +28,34 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     
     YANDEX_MODEL = "yandexgpt" 
     
-    # 1. УМНАЯ РАЗБИВКА ПО СЕКЦИЯМ
-    # Ищем упоминания SECTION, Section или РАЗДЕЛ с помощью регулярного выражения
-    raw_blocks = re.split(r'(?i)(?=section\s+\d+|раздел\s+\d+)', text)
+    lines = text.split('\n')
+    blocks = []
+    current_block = []
+    current_length = 0
     
-    # Очищаем блоки от пустых пробелов и убираем пустые элементы
-    blocks = [block.strip() for block in raw_blocks if block.strip()]
-    
-    # Если текст не разбился (например, нет ключевых слов), подстрахуемся старым методом
-    if len(blocks) <= 1:
-        lines = text.split('\n')
-        current_block = []
-        current_length = 0
-        blocks = []
-        for line in lines:
-            current_block.append(line)
-            current_length += len(line)
-            if current_length > 2000:  # Снизили лимит для надежности
-                blocks.append('\n'.join(current_block))
-                current_block = []
-                current_length = 0
-        if current_block:
+    for line in lines:
+        cleaned_line = line.strip()
+        
+        # Проверяем, начинается ли строка с SECTION или РАЗДЕЛ (регистронезависимо)
+        is_new_section = bool(re.match(r'^(section|раздел)\s+\d+', cleaned_line, re.IGNORECASE))
+        
+        # Если встретили новый РАЗДЕЛ или текущий блок уже слишком большой,
+        # сохраняем накопленный блок и начинаем новый
+        if (is_new_section and current_block) or current_length > 2500:
             blocks.append('\n'.join(current_block))
-
+            current_block = []
+            current_length = 0
+            
+        current_block.append(line)
+        current_length += len(line)
+        
+    # Не забываем добавить последний оставшийся кусочек
+    if current_block:
+        blocks.append('\n'.join(current_block))
+            
+    # Дополнительная очистка пустых блоков
+    blocks = [b.strip() for b in blocks if b.strip()]
+            
     translated_blocks = []
     
     # ЖЕСТКИЙ ПРОМПТ С ДИРЕКТИВОЙ ПО НАЗВАНИЮ ПРОДУКТА
@@ -79,13 +84,12 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
             continue
             
         try:
-            # Увеличили max_output_tokens, чтобы тяжелые разделы (8, 9, 10) не обрезались на полуслове
             response = client.responses.create(
                 model=f"gpt://{folder_id}/{YANDEX_MODEL}",
                 instructions=system_instruction,
                 input=[{"role": "user", "content": block}],
                 temperature=0.1, 
-                max_output_tokens=4000  
+                max_output_tokens=4000  # Оставляем запас под большие таблицы
             )
             
             if response.output and response.output[0].content and response.output[0].content[0].text:
