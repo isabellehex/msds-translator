@@ -4,6 +4,8 @@ import pdfplumber
 import io
 import re
 import os
+import zipfile
+import xml.etree.ElementTree as ET
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -15,52 +17,117 @@ st.set_page_config(
     layout="wide"
 )
 
+def clean_inline_duplicate(text: str) -> str:
+    """Удаляет дублирование фраз, склеенных внутри одной строки (например, 'HelloHello')"""
+    text = text.strip()
+    if not text:
+        return ""
+    mid = len(text) // 2
+    if len(text) % 2 == 0 and text[:mid] == text[mid:]:
+        return text[:mid].strip()
+    return text
+
+def extract_raw_xml_text_from_zip(file_bytes) -> str:
+    """Шаг 1: Низкоуровневое извлечение текста из ZIP-структуры DOCX памяти"""
+    WORD_NAMESPACE = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+    TEXT_TAG = f'{WORD_NAMESPACE}t'
+    PARA_TAG = f'{WORD_NAMESPACE}p'
+    NUM_PR_TAG = f'{WORD_NAMESPACE}numPr'
+
+    all_extracted_lines = []
+    
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+            # Читаем только основной документ и колонтитулы
+            xml_files = [f for f in z.namelist() if f.endswith('.xml') and ('word/document' in f or 'word/header' in f)]
+            xml_files.sort(key=lambda x: ('document' in x, x))
+
+            for xml_file in xml_files:
+                with z.open(xml_file) as f:
+                    root = ET.fromstring(f.read())
+                    for p in root.iter(PARA_TAG):
+                        prefix = ""
+                        numPr = p.find(f'.//{NUM_PR_TAG}')
+                        if numPr is not None:
+                            prefix = "• "
+                            
+                        text_pieces = [node.text for node in p.iter(TEXT_TAG) if node.text]
+                        p_text = "".join(text_pieces).strip()
+                        p_text = clean_inline_duplicate(p_text)
+                        
+                        if p_text:
+                            all_extracted_lines.append(f"{prefix}{p_text}")
+    except Exception as e:
+        st.error(f"Ошибка при XML-парсинге DOCX: {e}")
+        return ""
+
+    return "\n".join(all_extracted_lines)
+
 def normalize_msds_text(text: str) -> str:
-    """Шаг 2: Нормализация текста с защитой от ложных разделов (ссылок вида see section 16)"""
+    """Шаг 2: Глубокая нормализация структуры, таблиц и защита от 'see section'"""
     if not text.strip():
         return ""
     
-    # 1. Заменяем множественные пробелы и горизонтальные табы на один пробел
+    # Схлопываем пробелы
     text = re.sub(r'[ \t]+', ' ', text)
-    
-    # 2. Стандартизируем ТОЛЬКО реальные заголовки разделов (когда SECTION стоит в начале строки)
-    # Игнорируем упоминания внутри предложений (например, "see section 13")
-    text = re.sub(r'(?im)^[ \t]*(section|раздел)\s*(\d+)\b', r'\nSECTION \2: ', text)
+    # Восстанавливаем пробелы в подразделах (1.1.Product -> 1.1. Product)
+    text = re.sub(r'^(\d+\.\d+\.?)([A-Za-zА-Яа-я])', r'\1 \2', text, flags=re.MULTILINE)
+    # Жестко стандартизируем истинные главные разделы в начале строки
+    text = re.sub(r'(?im)^[ \t]*(section|раздел)\s*(\d+)\s*[:.-]*\s*\b', r'\nSECTION \2: ', text)
     
     lines = text.split('\n')
     cleaned_lines = []
+    seen_sections = set()
+    
+    stop_patterns = [
+        r'www\.spanlab\.in',
+        r'Safety Data Sheet',
+        r'MATERIAL SAFETY DATA SHEET'
+    ]
     
     for line in lines:
         line_str = line.strip()
         if not line_str:
             continue
             
-        # Строка признается заголовком раздела, только если она начинается строго с SECTION [цифра]:
-        # и она относительно короткая (заголовок не бывает длиной во весь абзац)
+        if any(re.search(pat, line_str, re.IGNORECASE) for pat in stop_patterns):
+            if len(line_str) < 50:
+                continue
+        
+        line_str = re.sub(r':\s*:', ':', line_str)
+        
         is_main_section = bool(re.match(r'^SECTION\s+\d+:', line_str)) and len(line_str) < 120
+        is_sub_section = bool(re.match(r'^(\d+\.\d+|\d+\.)', line_str)) or line_str.startswith('•') or line_str.startswith('-')
         
-        # Проверка на подразделы (1.1, 2.3 и т.д.) или пункты списков
-        is_sub_section = bool(re.match(r'^(\d+\.\d+|\d+\.)', line_str)) or line_str.startswith('-')
-        
-        is_structural = is_main_section or is_sub_section or line_str.endswith(':')
-        
-        if is_structural:
-            cleaned_lines.append('\n' + line_str)  # Выделяем структуру
+        if is_main_section:
+            section_marker = re.match(r'^SECTION\s+\d+', line_str).group(0)
+            if section_marker in seen_sections:
+                continue
+            seen_sections.add(section_marker)
+            cleaned_lines.append('\n' + line_str)
+            continue
+
+        if cleaned_lines and line_str == cleaned_lines[-1].strip():
+            continue
+            
+        if is_sub_section or line_str.endswith(':'):
+            cleaned_lines.append('\n' + line_str)
         else:
-            # Если это обычный текст, и предыдущая строка не была главным заголовком раздела,
-            # склеиваем её с предыдущей (лечим разрывы таблиц)
             if cleaned_lines and not bool(re.match(r'^\nSECTION\s+\d+:', cleaned_lines[-1])) and not cleaned_lines[-1].endswith(':'):
-                cleaned_lines[-1] = cleaned_lines[-1] + " " + line_str
+                prev = cleaned_lines[-1]
+                if line_str not in prev:
+                    if "Product form" in line_str or "CAS-No" in line_str or "Product code" in line_str:
+                        cleaned_lines[-1] = prev + "\n" + line_str
+                    else:
+                        cleaned_lines[-1] = prev + " " + line_str
             else:
                 cleaned_lines.append(line_str)
                 
     normalized = '\n'.join(cleaned_lines)
-    normalized = re.sub(r'\n\s*\n+', '\n\n', normalized)
-    
-    return normalized.strip()
+    return re.sub(r'\n\s*\n+', '\n\n', normalized).strip()
 
 def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """Шаг 3: Перевод MSDS с жестким контролем деления блоков по истинным SECTION"""
+    """Шаг 3: Перевод фрагментов через Yandex GPT на базе истинных SECTION"""
     if not text.strip():
         return ""
     
@@ -70,8 +137,6 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
         project=folder_id
     )
     
-    YANDEX_MODEL = "yandexgpt" 
-    
     lines = text.split('\n')
     blocks = []
     current_block = []
@@ -79,8 +144,6 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     
     for line in lines:
         cleaned_line = line.strip()
-        
-        # Блок закрывается ТОЛЬКО если мы встретили истинный заголовок "SECTION [цифра]:"
         is_new_section = bool(re.match(r'^SECTION\s+\d+:', cleaned_line))
         
         if (is_new_section and current_block) or current_length > 2500:
@@ -100,18 +163,14 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     system_instruction = (
         "Ты — высококлассный технический переводчик и эксперт по химической безопасности. "
         "Твоя задача — перевести фрагмент MSDS на русский язык (ГОСТ 30333-2022) и ОФОРМИТЬ ЕГО В СТРОГОМ MARKDOWN.\n\n"
-        f"КРИТИЧЕСКИ ВАЖНОЕ ТРЕБОВАНИЕ: Везде, где в тексте упоминается название продукта (в заголовках, свойствах, синонимах), "
-        f"ты ОБЯЗАН использовать исключительно название '{product_name_ru}'. "
-        f"Не склоняй его, не переводи дословно, не изменяй и не редактируй. Пиши ровно так: {product_name_ru}.\n\n"
-        "ПРАВИЛА ЖЕЛЕЗНОГО ФОРМАТИРОВАНИЯ:\n"
+        f"КРИТИЧЕСКИ ВАЖНОЕ ТРЕБОВАНИЕ: Везде, где в тексте упоминается название продукта, "
+        f"ты ОБЯЗАН использовать исключительно название '{product_name_ru}'. Не склоняй его и не изменяй.\n\n"
+        "ПРАВИЛА ФОРМАТИРОВАНИЯ:\n"
         "1. Главные разделы (SECTION / РАЗДЕЛ) выделяй одной решеткой: `# РАЗДЕЛ X: Название`.\n"
-        "2. Подразделы (1.1, 14.2 и т.д.) выделяй двумя решетками: `## 1.1 Название подраздела`.\n"
-        "3. Разделяй параметры и значения! Если строка содержит технический параметр и его значение "
-        "(например: 'Colour: White scales' или 'Flash point: 172 °C'), ты ОБЯЗАН оформить параметр жирным, "
-        "а значение оставить обычным. Пример: `**Цвет:** Белые чешуйки`.\n"
+        "2. Подразделы (1.1, 14.2) выделяй двумя решетками: `## 1.1 Название`.\n"
+        "3. Разделяй параметры и значения! Оформляй параметры жирным: `**Цвет:** Белые чешуйки`.\n"
         "4. Списки оформляй через дефис `- `.\n"
-        "5. КРИТИЧЕСКИ ВАЖНО: Сохраняй оригинальную нумерацию пунктов и подпунктов (1., 1.1, a), b)) в точности.\n"
-        "Убирай пустые строки. Выдавай ТОЛЬКО чистый Markdown перевод без своих комментариев."
+        "Убирай пустые строки. Выдавай ТОЛЬКО чистый перевод без комментариев."
     )
     
     progress_bar = st.progress(0)
@@ -120,22 +179,18 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     for i, block in enumerate(blocks):
         if not block.strip():
             continue
-            
         try:
             response = client.responses.create(
-                model=f"gpt://{folder_id}/{YANDEX_MODEL}",
+                model=f"gpt://{folder_id}/yandexgpt",
                 instructions=system_instruction,
                 input=[{"role": "user", "content": block}],
-                temperature=0.1, 
-                max_output_tokens=4000  
+                temperature=0.1,
+                max_output_tokens=4000
             )
-            
             if response.output and response.output[0].content and response.output[0].content[0].text:
-                translated_text = response.output[0].content[0].text
-                translated_blocks.append(translated_text)
+                translated_blocks.append(response.output[0].content[0].text)
             else:
                 translated_blocks.append(block)
-                
         except Exception as e:
             st.warning(f"Ошибка на блоке {i+1}: {str(e)}")
             translated_blocks.append(block)
@@ -146,9 +201,8 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     return '\n\n'.join(translated_blocks)
 
 def make_formatted_docx(markdown_text: str, product_name_ru: str):
-    """Шаг 4: Сборщик Word-документа с интеграцией официального названия в колонтитулы"""
+    """Шаг 4: Сборщик Word-документа по ГОСТ-стилистике"""
     doc = Document()
-    
     for section in doc.sections:
         section.top_margin = Inches(0.39)
         section.bottom_margin = Inches(0.39)
@@ -196,7 +250,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
             run.font.color.rgb = DARK_BLUE
             p.paragraph_format.space_before = Pt(12)
             p.paragraph_format.space_after = Pt(6)
-            
         elif cleaned_line.startswith('## '):
             text_content = cleaned_line.replace('## ', '').strip()
             run = p.add_run(text_content)
@@ -204,14 +257,12 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
             run.font.size = Pt(11)
             run.font.color.rgb = DARK_BLUE
             p.paragraph_format.space_before = Pt(6)
-            
         else:
             if cleaned_line.startswith('- '):
                 cleaned_line = cleaned_line.replace('- ', '', 1)
                 p.paragraph_format.left_indent = Inches(0.25)
             
             parts = re.split(r'(\*\*.*?\*\*)', cleaned_line)
-            
             for part in parts:
                 if part.startswith('**') and part.endswith('**'):
                     bold_text = part.replace('**', '')
@@ -219,7 +270,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
                     run.bold = True
                 else:
                     run = p.add_run(part)
-                
                 run.font.name = 'Arial'
                 run.font.size = Pt(9)
                 
@@ -228,10 +278,9 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
     bio.seek(0)
     return bio
 
-
 # --- Интерфейс Streamlit ---
 st.title("🧪 MSDS Translator — Premium AI Studio")
-st.caption("Пошаговый конвейер с фильтрацией ложных разделов и перекрестных ссылок.")
+st.caption("Пошаговый конвейер с глубоким XML-дедупликатором и защитой структуры.")
 
 st.divider()
 
@@ -266,39 +315,38 @@ if input_method == "Вставить текст вручную":
     if inserted_text:
         st.session_state.raw_text = inserted_text
 else:
-    # Вернули поддержку PDF обратно в список доступных форматов
     uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
     if uploaded_file is not None:
         st.session_state.file_name_output = f"Translated_{uploaded_file.name}"
         if uploaded_file.name.endswith(".txt"):
             st.session_state.raw_text = str(uploaded_file.read(), "utf-8")
         elif uploaded_file.name.endswith(".docx"):
-            doc = Document(io.BytesIO(uploaded_file.read()))
-            st.session_state.raw_text = "\n".join([para.text for para in doc.paragraphs])
+            # Применяем наш ядерный XML парсер напрямую к байтам
+            st.session_state.raw_text = extract_raw_xml_text_from_zip(uploaded_file.read())
         elif uploaded_file.name.endswith(".pdf"):
             with pdfplumber.open(io.BytesIO(uploaded_file.read())) as pdf:
                 st.session_state.raw_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
 
 if st.session_state.raw_text:
-    with st.expander("🔍 Просмотр оригинального текста (Шаг 1)", expanded=True):
+    with st.expander("🔍 Просмотр извлеченного оригинального текста (Шаг 1)", expanded=True):
         st.text_area("Оригинал без изменений:", value=st.session_state.raw_text, height=200, disabled=True, key="raw_preview")
 
 st.divider()
 
 # --- ШАГ 2 ---
 st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
-st.caption("Склеивает таблицы, защищая ссылки вида 'see section 16' от превращения в новые разделы.")
+st.caption("Фильтрует дубли, склеивает разорванные ячейки и блокирует ложные переходы по ссылкам.")
 
 if st.button("🔧 Запустить нормализацию текста", type="secondary", use_container_width=True):
     if st.session_state.raw_text:
         st.session_state.normalized_text = normalize_msds_text(st.session_state.raw_text)
-        st.success("Текст успешно нормализован и очищен!")
+        st.success("Текст успешно нормализован, очищен от мусора колонтитулов и дублей!")
     else:
         st.warning("Сначала загрузите или вставьте исходный текст на Шаге 1.")
 
 if st.session_state.normalized_text:
     with st.expander("🛠️ Просмотр нормализованного текста (Шаг 2)", expanded=True):
-        st.text_area("Текст, готовый к отправке в нейросеть (проверьте отсутствие ложных SECTION):", value=st.session_state.normalized_text, height=250, disabled=True, key="norm_preview")
+        st.text_area("Текст, подготовленный к отправке в YandexGPT:", value=st.session_state.normalized_text, height=250, disabled=True, key="norm_preview")
 
 st.divider()
 
