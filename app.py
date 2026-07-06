@@ -137,7 +137,11 @@ def create_word_document(translated_text: str) -> io.BytesIO:
     return file_stream
 
 # 5. Главный экран приложения
-uploaded_file = st.file_uploader("Шаг 1: Загрузите оригинальный паспорт безопасности (PDF)", type=["pdf"])
+# ТЕПЕРЬ ПРИНИМАЕМ И PDF, И DOCX!
+uploaded_file = st.file_uploader(
+    "Шаг 1: Загрузите оригинальный паспорт безопасности (PDF или DOCX)", 
+    type=["pdf", "docx"]
+)
 
 if uploaded_file is not None:
     st.success("Файл успешно загружен!")
@@ -147,21 +151,36 @@ if uploaded_file is not None:
         if not folder_id or not api_key:
             st.error("❌ Пожалуйста, заполните Yandex Folder ID и API Key в левой боковой панели!")
         else:
-            with st.spinner("Считываем текст из PDF..."):
-                try:
-                    # Извлекаем текст из PDF с помощью pdfplumber
-                    with pdfplumber.open(uploaded_file) as pdf:
-                        full_text = ""
-                        for page in pdf.pages:
-                            text = page.extract_text()
-                            if text:
-                                full_text += text + "\n"
-                except Exception as e:
-                    st.error(f"Не удалось прочитать PDF-файл: {e}")
-                    full_text = None
+            full_text = ""
             
-            if full_text:
-                # Запускаем наш новый разделенный перевод
+            # --- УМНЫЙ ОБРАБОТЧИК ФОРМАТОВ ---
+            if uploaded_file.name.endswith('.pdf'):
+                with st.spinner("Считываем текст из PDF..."):
+                    try:
+                        with pdfplumber.open(uploaded_file) as pdf:
+                            for page in pdf.pages:
+                                text = page.extract_text()
+                                if text:
+                                    full_text += text + "\n"
+                    except Exception as e:
+                        st.error(f"Не удалось прочитать PDF-файл: {e}")
+                        full_text = None
+                        
+            elif uploaded_file.name.endswith('.docx'):
+                with st.spinner("Считываем текст из Word (.docx)..."):
+                    try:
+                        # Читаем вордовский файл построчно
+                        doc_in = Document(uploaded_file)
+                        for paragraph in doc_in.paragraphs:
+                            if paragraph.text.strip():
+                                full_text += paragraph.text + "\n"
+                    except Exception as e:
+                        st.error(f"Не удалось прочитать DOCX-файл: {e}")
+                        full_text = None
+            # ---------------------------------
+            
+            if full_text and full_text.strip():
+                # Запускаем наш разделенный перевод (он работает одинаково для любого текста)
                 translated_result = translate_msds_by_chunks(full_text, folder_id, api_key, product_name_ru)
                 
                 st.markdown("---")
