@@ -249,7 +249,7 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
-def make_formatted_docx(markdown_text: str, product_name_ru: str):
+def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: str): # ← ДОБАВИЛИ В АРГУМЕНТЫ
     """Шаг 4: Сборщик Word-документа по ГОСТ-стилистике с премиум-шапкой"""
     doc = Document()
     
@@ -277,16 +277,7 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
         frun.font.size = Pt(8.5)
         frun.font.color.rgb = RGBColor(128, 128, 128)
         
-        fpage = fp.add_run("Страница [Page]")
-        fpage.font.name = 'Arial'
-        fpage.font.size = Pt(8.5)
-        fpage.font.color.rgb = RGBColor(128, 128, 128)
-
-    # --- ДОБАВЛЕНИЕ ПРЕМИУМ-ШАПКИ ДОКУМЕНТА ---
-    
-    # Пытаемся выудить CAS-номер из нормализованного текста для автоматической подстановки
-    cas_match = re.search(r'(?:CAS[-_ ]No|CAS|КАС)[.:\s]*([\d-]+)', markdown_text, re.IGNORECASE)
-    cas_number = cas_match.group(1) if cas_match else "—"
+    # --- ГЕНЕРАЦИЯ ШАПКИ ДОКУМЕНТА (ТЕПЕРЬ НАПРЯМУЮ ИЗ ИНТЕРФЕЙСА) ---
 
     # Строка 1: Паспорт безопасности материала
     p_header1 = doc.add_paragraph()
@@ -311,8 +302,8 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
     # Строка 3: CAS № + Элегантная черная линия снизу абзаца
     p_header3 = doc.add_paragraph()
     p_header3.paragraph_format.space_before = Pt(0)
-    p_header3.paragraph_format.space_after = Pt(18) # Отступ после линии до основного текста
-    run_h3 = p_header3.add_run(f"CAS № {cas_number}")
+    p_header3.paragraph_format.space_after = Pt(18)
+    run_h3 = p_header3.add_run(f"CAS № {product_cas.strip()}") # ← ИСПОЛЬЗУЕМ ЗНАЧЕНИЕ ИЗ ИНПУТА
     run_h3.bold = True
     run_h3.font.name = 'Arial'
     run_h3.font.size = Pt(16)
@@ -322,10 +313,10 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
     pPr = p_header3._p.get_or_add_pPr()
     pBdr = OxmlElement('w:pBdr')
     bottom = OxmlElement('w:bottom')
-    bottom.set(qn('w:val'), 'single') # Сплошная линия
-    bottom.set(qn('w:sz'), '6')       # Толщина (6 = 0.75 pt, тонкая и аккуратная)
-    bottom.set(qn('w:space'), '8')    # Расстояние от текста до линии
-    bottom.set(qn('w:color'), '000000') # Черный цвет
+    bottom.set(qn('w:val'), 'single')
+    bottom.set(qn('w:sz'), '6')       
+    bottom.set(qn('w:space'), '8')    
+    bottom.set(qn('w:color'), '000000')
     pBdr.append(bottom)
     pPr.append(pBdr)
 
@@ -483,7 +474,7 @@ st.header("Шаг 4: Экспорт в Word")
 
 if st.session_state.translated_text:
     if "Ошибка" not in st.session_state.translated_text:
-        docx_data = make_formatted_docx(st.session_state.translated_text, product_name_ru)
+        docx_data = make_formatted_docx(st.session_state.translated_text, product_name_ru, product_cas)
         st.download_button(
             label="💾 Скачать отформатированный файл WORD (.docx)",
             data=docx_data,
