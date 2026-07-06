@@ -8,15 +8,59 @@ from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# Настройка страницы
+# --- Настройка страницы ---
 st.set_page_config(
     page_title="MSDS Yandex AI Studio Pro",
     page_icon="🧪",
     layout="wide"
 )
 
+def normalize_msds_text(text: str) -> str:
+    """Шаг 2: Нормализация и очистка 'рваного' текста из таблиц и фигур Word"""
+    if not text.strip():
+        return ""
+    
+    # 1. Заменяем множественные пробелы и горизонтальные табы на один пробел
+    text = re.sub(r'[ \t]+', ' ', text)
+    
+    # 2. Стандартизируем заголовки разделов (убираем лишние пробелы вокруг цифр)
+    # Приводим к единому виду: SECTION X: Название
+    text = re.sub(r'(?i)\b(section|раздел)\s*[:._-]?\s*(\d+)', r'\nSECTION \2: ', text)
+    
+    # Разбираем текст построчно для склейки разорванных табличных строк
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        line_str = line.strip()
+        if not line_str:
+            continue
+            
+        # Если строка — очевидный заголовок или пункт списка/подраздела, оставляем её отдельно
+        is_structural = (
+            line_str.startswith('SECTION') or 
+            bool(re.match(r'^(\d+\.\d+|\d+\.)', line_str)) or 
+            line_str.startswith('-') or
+            line_str.endswith(':')
+        )
+        
+        if is_structural:
+            cleaned_lines.append('\n' + line_str)  # Отделяем структурные элементы пустой строкой
+        else:
+            # Если предыдущая строка не заголовок, склеиваем текущую с предыдущей через пробел
+            if cleaned_lines and not cleaned_lines[-1].startswith('\nSECTION') and not cleaned_lines[-1].endswith(':'):
+                cleaned_lines[-1] = cleaned_lines[-1] + " " + line_str
+            else:
+                cleaned_lines.append(line_str)
+                
+    # Собираем обратно и убираем дублирующиеся пустые строки
+    normalized = '\n'.join(cleaned_lines)
+    normalized = re.sub(r'\n\s*\n+', '\n\n', normalized)
+    
+    return normalized.strip()
+
 def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """Перевод MSDS с умной разбивкой по строкам, реагирующей на SECTION"""
+    """Шаг 3: Интеллектуальный перевод MSDS с разбивкой строго по строкам/секциям"""
     if not text.strip():
         return ""
     
@@ -28,6 +72,7 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     
     YANDEX_MODEL = "yandexgpt" 
     
+    # Нарезка текста на блоки с контролем ключевых слов SECTION
     lines = text.split('\n')
     blocks = []
     current_block = []
@@ -36,11 +81,10 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     for line in lines:
         cleaned_line = line.strip()
         
-        # Проверяем, начинается ли строка с SECTION или РАЗДЕЛ (регистронезависимо)
-        is_new_section = bool(re.match(r'^(section|раздел)\s+\d+', cleaned_line, re.IGNORECASE))
+        # Проверяем, начинается ли строка с SECTION (после нашей нормализации они все стандартизированы)
+        is_new_section = cleaned_line.startswith('SECTION')
         
-        # Если встретили новый РАЗДЕЛ или текущий блок уже слишком большой,
-        # сохраняем накопленный блок и начинаем новый
+        # Если встретили новый РАЗДЕЛ или текущий блок уже слишком большой, сохраняем его
         if (is_new_section and current_block) or current_length > 2500:
             blocks.append('\n'.join(current_block))
             current_block = []
@@ -49,13 +93,10 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
         current_block.append(line)
         current_length += len(line)
         
-    # Не забываем добавить последний оставшийся кусочек
     if current_block:
         blocks.append('\n'.join(current_block))
             
-    # Дополнительная очистка пустых блоков
     blocks = [b.strip() for b in blocks if b.strip()]
-            
     translated_blocks = []
     
     # ЖЕСТКИЙ ПРОМПТ С ДИРЕКТИВОЙ ПО НАЗВАНИЮ ПРОДУКТА
@@ -89,7 +130,7 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
                 instructions=system_instruction,
                 input=[{"role": "user", "content": block}],
                 temperature=0.1, 
-                max_output_tokens=4000  # Оставляем запас под большие таблицы
+                max_output_tokens=4000  # С запасом под большие таблицы разделов 8, 9, 10
             )
             
             if response.output and response.output[0].content and response.output[0].content[0].text:
@@ -108,7 +149,7 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     return '\n\n'.join(translated_blocks)
 
 def make_formatted_docx(markdown_text: str, product_name_ru: str):
-    """Сборщик Word-документа с интеграцией официального названия в колонтитулы"""
+    """Шаг 4: Сборщик Word-документа с интеграцией официального названия в колонтитулы"""
     doc = Document()
     
     # Конфигурация страницы (Узкие поля 1 см)
@@ -141,7 +182,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
         fpage.font.color.rgb = RGBColor(128, 128, 128)
 
     DARK_BLUE = RGBColor(0, 51, 102)
-    
     lines = markdown_text.split('\n')
     
     for line in lines:
@@ -194,9 +234,10 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str):
     bio.seek(0)
     return bio
 
+
 # --- Интерфейс Streamlit ---
 st.title("🧪 MSDS Translator — Premium AI Studio")
-st.caption("Высокоструктурированный перевод паспортов химической безопасности с фиксацией номенклатуры.")
+st.caption("Пошаговый конвейер: контроль структуры и интеллектуальный перевод паспортов безопасности.")
 
 st.divider()
 
@@ -206,57 +247,99 @@ api_key = st.sidebar.text_input("Yandex API Key", type="password")
 
 st.sidebar.markdown("---")
 st.sidebar.header("📦 Химическая номенклатура")
-# Изменили поле по твоему запросу
 product_name_ru = st.sidebar.text_input("Официальное название продукта (RU):", value="ТРИМЕТИЛОЛПРОПАН")
 
-col1, col2 = st.columns(2)
-source_text = ""
-file_name_output = "MSDS_RU_Translated"
+# Инициализация хранилища состояний (Session State)
+if "raw_text" not in st.session_state:
+    st.session_state.raw_text = ""
+if "normalized_text" not in st.session_state:
+    st.session_state.normalized_text = ""
+if "translated_text" not in st.session_state:
+    st.session_state.translated_text = ""
+if "file_name_output" not in st.session_state:
+    st.session_state.file_name_output = "MSDS_RU_Translated"
 
-with col1:
-    st.subheader("Исходный документ (EN)")
-    input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / PDF / TXT)", "Вставить текст вручную"))
-    
-    if input_method == "Вставить текст вручную":
-        source_text = st.text_area("Вставьте текст MSDS на английском языке:", height=450, placeholder="SECTION 1: Identification...")
+# Очистка состояний при смене способа загрузки данных
+def reset_state():
+    st.session_state.raw_text = ""
+    st.session_state.normalized_text = ""
+    st.session_state.translated_text = ""
+
+# --- ШАГ 1: Загрузка или ввод данных ---
+st.header("Шаг 1: Загрузка исходного MSDS (EN)")
+input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / TXT)", "Вставить текст вручную"), on_change=reset_state)
+
+if input_method == "Вставить текст вручную":
+    inserted_text = st.text_area("Вставьте текст MSDS на английском языке:", height=250, placeholder="SECTION 1: Identification...")
+    if inserted_text:
+        st.session_state.raw_text = inserted_text
+else:
+    uploaded_file = st.file_uploader("Выберите файл", type=["docx", "txt"])
+    if uploaded_file is not None:
+        st.session_state.file_name_output = f"Translated_{uploaded_file.name}"
+        if uploaded_file.name.endswith(".txt"):
+            st.session_state.raw_text = str(uploaded_file.read(), "utf-8")
+        elif uploaded_file.name.endswith(".docx"):
+            doc = Document(io.BytesIO(uploaded_file.read()))
+            st.session_state.raw_text = "\n".join([para.text for para in doc.paragraphs])
+
+if st.session_state.raw_text:
+    with st.expander("🔍 Просмотр оригинального текста (Шаг 1)", expanded=True):
+        st.text_area("Оригинал без изменений:", value=st.session_state.raw_text, height=200, disabled=True, key="raw_preview")
+
+st.divider()
+
+# --- ШАГ 2: Нормализация структуры ---
+st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
+st.caption("Склеивает разорванные строки таблиц, удаляет скрытый мусор и выравнивает маркеры SECTION.")
+
+if st.button("🔧 Запустить нормализацию текста", type="secondary", use_container_width=True):
+    if st.session_state.raw_text:
+        st.session_state.normalized_text = normalize_msds_text(st.session_state.raw_text)
+        st.success("Текст успешно нормализован и очищен!")
     else:
-        uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
-        if uploaded_file is not None:
-            file_name_output = f"Translated_{uploaded_file.name}"
-            
-            if uploaded_file.name.endswith(".txt"):
-                source_text = str(uploaded_file.read(), "utf-8")
-            elif uploaded_file.name.endswith(".docx"):
-                doc = Document(io.BytesIO(uploaded_file.read()))
-                source_text = "\n".join([para.text for para in doc.paragraphs])
-            elif uploaded_file.name.endswith(".pdf"):
-                with pdfplumber.open(io.BytesIO(uploaded_file.read())) as pdf:
-                    source_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-            
-            st.text_area("Предпросмотр оригинального текста:", value=source_text, height=300, disabled=True)
+        st.warning("Сначала загрузите или вставьте исходный текст на Шаге 1.")
 
-if st.button("🔄 Выполнить интеллектуальный перевод и форматирование", type="primary", use_container_width=True):
+if st.session_state.normalized_text:
+    with st.expander("🛠️ Просмотр нормализованного текста (Шаг 2)", expanded=True):
+        st.text_area("Текст, готовый к отправке в нейросеть:", value=st.session_state.normalized_text, height=250, disabled=True, key="norm_preview")
+
+st.divider()
+
+# --- ШАГ 3: Интеллектуальный перевод ---
+st.header("Шаг 3: Перевод через YandexGPT")
+
+if st.button("🔄 Выполнить перевод (строго по секциям)", type="primary", use_container_width=True):
     if not folder_id or not api_key:
-        st.warning("Пожалуйста, введите Yandex Folder ID и API Key.")
-    elif source_text.strip():
-        with col2:
-            st.subheader("Осмысленный перевод (Markdown Preview)")
-            
-            # Передаем зафиксированное название в функцию перевода
-            translated_result = translate_msds_with_studio(source_text, folder_id, api_key, product_name_ru)
-            
-            st.markdown(translated_result)
-            
-            if "Ошибка" not in translated_result:
-                # Генерируем Word с тем же зафиксированным названием
-                docx_data = make_formatted_docx(translated_result, product_name_ru)
-                
-                st.download_button(
-                    label="💾 Скачать отформатированный файл WORD (.docx)",
-                    data=docx_data,
-                    file_name=file_name_output if file_name_output.endswith(".docx") else f"{file_name_output}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
+        st.warning("Пожалуйста, введите Yandex Folder ID и API Key в боковой панели.")
+    elif st.session_state.normalized_text:
+        with st.spinner("YandexGPT переводит документ секция за секцией... Пожалуйста, подождите."):
+            st.session_state.translated_text = translate_msds_with_studio(
+                st.session_state.normalized_text, folder_id, api_key, product_name_ru
+            )
+        st.success("Перевод завершен!")
     else:
-        st.warning("Пожалуйста, добавьте текст или загрузите файл перед переводом.")
+        st.warning("Нечего переводить. Сначала выполните Шаг 2 (Нормализация).")
+
+if st.session_state.translated_text:
+    with st.expander("📄 Предпросмотр готового перевода Markdown (Шаг 3)", expanded=True):
+        st.markdown(st.session_state.translated_text)
+
+st.divider()
+
+# --- ШАГ 4: Сборка DOCX файла и скачивание ---
+st.header("Шаг 4: Экспорт в Word")
+
+if st.session_state.translated_text:
+    if "Ошибка" not in st.session_state.translated_text:
+        docx_data = make_formatted_docx(st.session_state.translated_text, product_name_ru)
+        
+        st.download_button(
+            label="💾 Скачать отформатированный файл WORD (.docx)",
+            data=docx_data,
+            file_name=st.session_state.file_name_output if st.session_state.file_name_output.endswith(".docx") else f"{st.session_state.file_name_output}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True
+        )
+else:
+    st.info("Кнопка скачивания появится здесь, когда Шаг 3 (Перевод) будет успешно выполнен.")
