@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """Перевод MSDS с жестким требованием разметки Markdown и фиксированным именем продукта"""
+    """Перевод MSDS с разбивкой строго по РАЗДЕЛАМ (SECTION)"""
     if not text.strip():
         return ""
     
@@ -28,21 +28,29 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     
     YANDEX_MODEL = "yandexgpt" 
     
-    lines = text.split('\n')
-    blocks = []
-    current_block = []
-    current_length = 0
+    # 1. УМНАЯ РАЗБИВКА ПО СЕКЦИЯМ
+    # Ищем упоминания SECTION, Section или РАЗДЕЛ с помощью регулярного выражения
+    raw_blocks = re.split(r'(?i)(?=section\s+\d+|раздел\s+\d+)', text)
     
-    for line in lines:
-        current_block.append(line)
-        current_length += len(line)
-        if current_length > 3000:
+    # Очищаем блоки от пустых пробелов и убираем пустые элементы
+    blocks = [block.strip() for block in raw_blocks if block.strip()]
+    
+    # Если текст не разбился (например, нет ключевых слов), подстрахуемся старым методом
+    if len(blocks) <= 1:
+        lines = text.split('\n')
+        current_block = []
+        current_length = 0
+        blocks = []
+        for line in lines:
+            current_block.append(line)
+            current_length += len(line)
+            if current_length > 2000:  # Снизили лимит для надежности
+                blocks.append('\n'.join(current_block))
+                current_block = []
+                current_length = 0
+        if current_block:
             blocks.append('\n'.join(current_block))
-            current_block = []
-            current_length = 0
-    if current_block:
-        blocks.append('\n'.join(current_block))
-            
+
     translated_blocks = []
     
     # ЖЕСТКИЙ ПРОМПТ С ДИРЕКТИВОЙ ПО НАЗВАНИЮ ПРОДУКТА
@@ -71,12 +79,13 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
             continue
             
         try:
+            # Увеличили max_output_tokens, чтобы тяжелые разделы (8, 9, 10) не обрезались на полуслове
             response = client.responses.create(
                 model=f"gpt://{folder_id}/{YANDEX_MODEL}",
                 instructions=system_instruction,
                 input=[{"role": "user", "content": block}],
                 temperature=0.1, 
-                max_output_tokens=3000
+                max_output_tokens=4000  
             )
             
             if response.output and response.output[0].content and response.output[0].content[0].text:
