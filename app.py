@@ -385,6 +385,7 @@ api_key = st.sidebar.text_input("Yandex API Key", type="password")
 st.sidebar.markdown("---")
 st.sidebar.header("📦 Химическая номенклатура")
 product_name_ru = st.sidebar.text_input("Официальное название продукта (RU):", value="ТРИМЕТИЛОЛПРОПАН")
+product_cas = st.sidebar.text_input("Номер CAS:", value="77-99-6")
 
 if "raw_text" not in st.session_state:
     st.session_state.raw_text = ""
