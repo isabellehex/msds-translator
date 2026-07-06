@@ -31,16 +31,15 @@ product_name_ru = st.sidebar.text_input("Название продукта на 
 
 # 3. Функция умного перевода по частям (решает проблему пропуска разделов)
 def translate_msds_by_chunks(full_text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    import requests
-    from requests.adapters import HTTPAdapter
-    from urllib3.util import Retry
+    import time
+    from openai import OpenAI
     
     # Разбиваем текст на строки
     lines = full_text.split('\n')
     chunks = []
     current_chunk = []
     current_length = 0
-    max_chunk_size = 3000 # Немного уменьшим размер куска для надежности
+    max_chunk_size = 3500 
     
     for line in lines:
         current_chunk.append(line)
@@ -57,20 +56,13 @@ def translate_msds_by_chunks(full_text: str, folder_id: str, api_key: str, produ
     
     st.info(f"📋 Документ успешно разделен на {total_chunks} части для гарантированного перевода.")
     
-    # --- НАСТРОЙКА БРОНЕБОЙНОЙ СЕТЕВОЙ СЕССИИ ---
-    session = requests.Session()
-    # Если соединение оборвется, код автоматически повторит попытку до 5 раз с увеличивающейся паузой
-    retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
-    session.mount('https://', HTTPAdapter(max_retries=retries))
-    
-    url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-    
-    headers = {
-        "Authorization": f"Api-Key {api_key}",
-        "x-folder-id": folder_id,
-        "Content-Type": "application/json"
-    }
-    # --------------------------------------------
+    # ВОЗВРАЩАЕМ РОДНОЙ КЛИЕНТ OPENAI, КОТОРЫЙ ТОЧНО РАБОТАЛ
+    # Добавляем явный таймаут, чтобы облако ждало ответ
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://llm.api.cloud.yandex.net/v1/openai",
+        timeout=60.0  # Говорим библиотеке: жди ответ от Яндекса до 60 секунд!
+    )
     
     for i, chunk in enumerate(chunks, 1):
         st.write(f"⏳ Переводим часть {i} из {total_chunks}...")
@@ -83,36 +75,18 @@ def translate_msds_by_chunks(full_text: str, folder_id: str, api_key: str, produ
 ФРАГМЕНТ ДЛЯ ПЕРЕВОДА:
 {chunk}"""
 
-        # Структура запроса напрямую к Yandex GPT
-        data = {
-            "modelUri": f"gpt://{folder_id}/yandexgpt/latest",
-            "completionOptions": {
-                "stream": False,
-                "temperature": 0.1, # Низкая температура для максимальной строгости перевода
-                "maxTokens": "4000"
-            },
-            "messages": [
-                {
-                    "role": "user",
-                    "text": prompt
-                }
-            ]
-        }
-
         try:
-            # Отправляем прямой POST-запрос с таймаутом ожидания в 60 секунд
-            response = session.post(url, headers=headers, json=data, timeout=60)
+            # Стандартный рабочий запрос к Яндексу
+            response = client.chat.completions.create(
+                model="yandexgpt/latest", 
+                messages=[{"role": "user", "content": prompt}],
+                extra_headers={"x-folder-id": folder_id}
+            )
             
-            # Если Яндекс ответил ошибкой (например, 401 или 403) — сработает исключение
-            response.raise_for_status()
-            
-            # Вытаскиваем текст перевода из ответа Яндекса
-            result_json = response.json()
-            chunk_translation = result_json["result"]["alternatives"][0]["message"]["text"]
-            
+            chunk_translation = response.choices[0].message.content
             translated_parts.append(chunk_translation)
             
-            # Обязательная пауза между частями
+            # Даем серверу передышку, чтобы избежать блокировок трафика
             time.sleep(2.0)
             
         except Exception as e:
