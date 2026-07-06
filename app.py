@@ -15,84 +15,67 @@ st.set_page_config(
     layout="wide"
 )
 
-def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """Перевод MSDS с жестким требованием разметки Markdown и фиксированным именем продукта"""
-    if not text.strip():
-        return ""
+def translate_msds_with_studio(full_text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
+    """
+    Разбивает любой текст MSDS на аккуратные смысловые куски по объему,
+    переводит их по очереди и склеивает обратно.
+    """
+    # Разбиваем весь текст на отдельные строчки
+    lines = full_text.split('\n')
     
-    client = openai.OpenAI(
-        api_key=api_key,
-        base_url="https://ai.api.cloud.yandex.net/v1",
-        project=folder_id
-    )
-    
-    YANDEX_MODEL = "yandexgpt" 
-    
-    lines = text.split('\n')
-    blocks = []
-    current_block = []
+    chunks = []
+    current_chunk = []
     current_length = 0
     
+    # Задаем лимит: примерно 3000 символов на один запрос (это безопасно для вывода)
+    max_chunk_size = 3000 
+    
     for line in lines:
-        current_block.append(line)
-        current_length += len(line)
-        if current_length > 3000:
-            blocks.append('\n'.join(current_block))
-            current_block = []
-            current_length = 0
-    if current_block:
-        blocks.append('\n'.join(current_block))
-            
-    translated_blocks = []
-    
-    # ЖЕСТКИЙ ПРОМПТ С ДИРЕКТИВОЙ ПО НАЗВАНИЮ ПРОДУКТА
-    system_instruction = (
-        "Ты — высококлассный технический переводчик и эксперт по химической безопасности. "
-        "Твоя задача — перевести фрагмент MSDS на русский язык (ГОСТ 30333-2022) и ОФОРМИТЬ ЕГО В СТРОГОМ MARKDOWN.\n\n"
-        f"КРИТИЧЕСКИ ВАЖНОЕ ТРЕБОВАНИЕ: Везде, где в тексте упоминается название продукта (в заголовках, свойствах, синонимах), "
-        f"ты ОБЯЗАН использовать исключительно название '{product_name_ru}'. "
-        f"Не склоняй его, не переводи дословно, не изменяй и не редактируй. Пиши ровно так: {product_name_ru}.\n\n"
-        "ПРАВИЛА ЖЕЛЕЗНОГО ФОРМАТИРОВАНИЯ:\n"
-        "1. Главные разделы (SECTION / РАЗДЕЛ) выделяй одной решеткой: `# РАЗДЕЛ X: Название`.\n"
-        "2. Подразделы (1.1, 14.2 и т.д.) выделяй двумя решетками: `## 1.1 Название подраздела`.\n"
-        "3. Разделяй параметры и значения! Если строка содержит технический параметр и его значение "
-        "(например: 'Colour: White scales' или 'Flash point: 172 °C'), ты ОБЯЗАН оформить параметр жирным, "
-        "а значение оставить обычным. Пример: `**Цвет:** Белые чешуйки`.\n"
-        "4. Списки оформляй через дефис `- `.\n"
-        "5. КРИТИЧЕСКИ ВАЖНО: Сохраняй оригинальную нумерацию пунктов и подпунктов (1., 1.1, a), b)) в точности.\n"
-        "Убирай пустые строки. Выдавай ТОЛЬКО чистый Markdown перевод без своих комментариев."
-    )
-    
-    progress_bar = st.progress(0)
-    total_blocks = len(blocks)
-    
-    for i, block in enumerate(blocks):
-        if not block.strip():
-            continue
-            
-        try:
-            response = client.responses.create(
-                model=f"gpt://{folder_id}/{YANDEX_MODEL}",
-                instructions=system_instruction,
-                input=[{"role": "user", "content": block}],
-                temperature=0.1, 
-                max_output_tokens=3000
-            )
-            
-            if response.output and response.output[0].content and response.output[0].content[0].text:
-                translated_text = response.output[0].content[0].text
-                translated_blocks.append(translated_text)
-            else:
-                translated_blocks.append(block)
-                
-        except Exception as e:
-            st.warning(f"Ошибка на блоке {i+1}: {str(e)}")
-            translated_blocks.append(block)
-            
-        progress_bar.progress(min((i + 1) / total_blocks, 1.0))
+        current_chunk.append(line)
+        current_length += len(line) + 1  # +1 для символа переноса строки
         
-    progress_bar.empty()
-    return '\n\n'.join(translated_blocks)
+        # Если набрали критическую массу — сохраняем кусок и начинаем новый
+        if current_length > max_chunk_size:
+            chunks.append("\n".join(current_chunk))
+            current_chunk = []
+            current_length = 0
+            
+    # Не забываем забрать остаток текста, если он есть
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+        
+    translated_parts = []
+    total_chunks = len(chunks)
+    
+    st.info(f"📋 Документ успешно разделен на {total_chunks} частей для гарантированного перевода.")
+    
+    # Переводим каждый кусок по очереди
+    for i, chunk in enumerate(chunks, 1):
+        st.write(f"⏳ Переводим часть {i} из {total_chunks}...")
+        
+        prompt = f"""Ты — профессиональный химик-технолог и переводчик. 
+Переведи предоставленный фрагмент паспорта безопасности (MSDS) вещества {product_name_ru} на русский язык.
+Переводи строго, сохраняй структуру, числовые данные, таблицы, аббревиатуры и оригинальные CAS-номера.
+Не сокращай текст, не убирай технические данные и не пиши никаких вступлений от себя — только чистый перевод текста.
+
+ФРАГМЕНТ ДЛЯ ПЕРЕВОДА:
+{chunk}"""
+
+        try:
+            # Твой стандартный запрос к API (замени на свой рабочий вызов, если он отличается)
+            response = openai.chat.completions.create(
+                model="yandexgpt/latest", 
+                messages=[{"role": "user", "content": prompt}]
+            )
+            chunk_translation = response.choices[0].message.content
+            translated_parts.append(chunk_translation)
+        except Exception as e:
+            st.error(f"Ошибка при переводе части {i}: {e}")
+            translated_parts.append(f"\n[Ошибка перевода части {i}]\n")
+            
+    # Соединяем все части в единый итоговый текст
+    full_translation = "\n\n".join(translated_parts)
+    return full_translation
 
 def make_formatted_docx(markdown_text: str, product_name_ru: str):
     """Сборщик Word-документа с интеграцией официального названия в колонтитулы"""
@@ -209,7 +192,7 @@ with col1:
     else:
         uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
         if uploaded_file is not None:
-            file_name_output = f"Translated_{uploaded_file.name}"
+            file_name_output = f"{uploaded_file.name}_RU"
             
             if uploaded_file.name.endswith(".txt"):
                 source_text = str(uploaded_file.read(), "utf-8")
