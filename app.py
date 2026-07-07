@@ -374,16 +374,16 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
 
 # --- Интерфейс Streamlit ---
 st.title("🧪 MSDS Translator — Premium AI Studio")
-st.caption("Пошаговый конвейер с глубоким XML-дедупликатором и защитой структуры.")
+st.caption("Пошаговый конвейер.")
 
 st.divider()
 
-st.sidebar.header("🔑 Доступ к Yandex AI Studio")
+st.sidebar.header("Доступ к Yandex AI Studio")
 folder_id = st.sidebar.text_input("Yandex Folder ID", type="password")
 api_key = st.sidebar.text_input("Yandex API Key", type="password")
 
 st.sidebar.markdown("---")
-st.sidebar.header("📦 Химическая номенклатура")
+st.sidebar.header("Продукт")
 product_name_ru = st.sidebar.text_input("Официальное название продукта (RU):", value="ТРИМЕТИЛОЛПРОПАН")
 product_cas = st.sidebar.text_input("Номер CAS:", value="77-99-6")
 
@@ -412,7 +412,7 @@ if input_method == "Вставить текст вручную":
 else:
     uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
     if uploaded_file is not None:
-        st.session_state.file_name_output = f"Translated_{uploaded_file.name}"
+        st.session_state.file_name_output = f"{uploaded_file.name}_RU"
         if uploaded_file.name.endswith(".txt"):
             st.session_state.raw_text = str(uploaded_file.read(), "utf-8")
         elif uploaded_file.name.endswith(".docx"):
@@ -423,7 +423,7 @@ else:
                 st.session_state.raw_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
 
 if st.session_state.raw_text:
-    with st.expander("🔍 Просмотр извлеченного оригинального текста (Шаг 1)", expanded=True):
+    with st.expander("Просмотр извлеченного оригинального текста (Шаг 1)", expanded=True):
         st.text_area("Оригинал без изменений:", value=st.session_state.raw_text, height=200, disabled=True, key="raw_preview")
 
 st.divider()
@@ -443,7 +443,7 @@ if st.button("🔧 Запустить нормализацию текста", ty
         with st.spinner("Выравнивание структуры и удаление дубликатов..."):
             st.session_state.normalized_text = normalize_msds_with_glossary(st.session_state.raw_text, glossary)
             
-        st.success("Успех! Построен динамический глоссарий, дубликаты разделов полностью уничтожены!")
+        st.success("Успех!")
     else:
         st.warning("Сначала загрузите или вставьте исходный текст на Шаге 1.")
 
@@ -452,7 +452,7 @@ st.divider()
 # --- ШАГ 3 ---
 st.header("Шаг 3: Перевод через YandexGPT")
 
-if st.button("🔄 Выполнить перевод (строго по секциям)", type="primary", use_container_width=True):
+if st.button("Выполнить перевод", type="primary", use_container_width=True):
     if not folder_id or not api_key:
         st.warning("Пожалуйста, введите Yandex Folder ID и API Key в боковой панели.")
     elif st.session_state.normalized_text:
@@ -465,7 +465,7 @@ if st.button("🔄 Выполнить перевод (строго по секц
         st.warning("Нечего переводить. Сначала выполните Шаг 2.")
 
 if st.session_state.translated_text:
-    with st.expander("📄 Предпросмотр готового перевода Markdown (Шаг 3)", expanded=True):
+    with st.expander("Предпросмотр готового перевода Markdown (Шаг 3)", expanded=True):
         st.markdown(st.session_state.translated_text)
 
 st.divider()
@@ -477,7 +477,7 @@ if st.session_state.translated_text:
     if "Ошибка" not in st.session_state.translated_text:
         docx_data = make_formatted_docx(st.session_state.translated_text, product_name_ru, product_cas)
         st.download_button(
-            label="💾 Скачать отформатированный файл WORD (.docx)",
+            label="Скачать отформатированный файл WORD (.docx)",
             data=docx_data,
             file_name=st.session_state.file_name_output if st.session_state.file_name_output.endswith(".docx") else f"{st.session_state.file_name_output}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
