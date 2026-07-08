@@ -147,20 +147,32 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
     return current_glossary
 
 def normalize_msds_with_glossary(text: str, glossary: dict) -> str:
-    """Заменяет оригинальные заголовки по словарю их перевода и схлопывает дубликаты"""
+    """Заменяет термины по словарю и аккуратно выравнивает структуру (ключ-значение)"""
     if not text.strip():
         return ""
     
-    for orig_header, ru_header in glossary.items():
-        cleaned_ru = ru_header.strip().lstrip('#').strip()
-        if not cleaned_ru.lower().startswith('раздел'):
-            num_match = re.search(r'\d+', orig_header)
-            if num_match:
-                cleaned_ru = f"РАЗДЕЛ {num_match.group(0)}: {cleaned_ru}"
-                
-        formatted_header = f"\n# {cleaned_ru}\n"
-        text = text.replace(orig_header, formatted_header)
+    # 1. Сортируем словарь по убыванию длины. 
+    # Это важно: сначала заменяем длинные предложения до точки, потом короткие фразы
+    sorted_glossary_keys = sorted(glossary.keys(), key=len, reverse=True)
+    
+    for orig_term in sorted_glossary_keys:
+        ru_term = glossary[orig_term]
         
+        # Проверяем, является ли ключ из словаря ГЛАВНЫМ заголовком (SECTION)
+        if bool(re.match(r'(?im)^[ \t]*(?:section|раздел)\s*\d+', orig_term)):
+            cleaned_ru = ru_term.strip().lstrip('#').strip()
+            if not cleaned_ru.lower().startswith('раздел'):
+                num_match = re.search(r'\d+', orig_term)
+                if num_match:
+                    cleaned_ru = f"РАЗДЕЛ {num_match.group(0)}: {cleaned_ru}"
+                    
+            formatted_term = f"\n# {cleaned_ru}\n"
+            text = text.replace(orig_term, formatted_term)
+        else:
+            # Если это обычная фраза, предложение до точки или подраздел — заменяем прямо в тексте (inline)
+            text = text.replace(orig_term, ru_term)
+            
+    # Убираем лишние пробелы и чиним разорванные номера подразделов
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'^(\d+\.\d+\.?)([A-Za-zА-Яа-я])', r'\1 \2', text, flags=re.MULTILINE)
     
@@ -185,8 +197,12 @@ def normalize_msds_with_glossary(text: str, glossary: dict) -> str:
         
         line_str = re.sub(r':\s*:', ':', line_str)
         
+        # ОПРЕДЕЛЯЕМ ТИП СТРОКИ
         is_main_section = line_str.startswith('# РАЗДЕЛ') or line_str.startswith('# SECTION')
         is_sub_section = bool(re.match(r'^(\d+\.\d+|\d+\.)', line_str)) or line_str.startswith('•') or line_str.startswith('-')
+        
+        # НОВОЕ: Детектор параметров "Ключ: Значение" (например "Form: Solid" или "pH : 7")
+        is_key_value = bool(re.match(r'^[^:]+:', line_str)) and len(line_str.split(':')[0]) < 50
         
         if is_main_section:
             section_marker = " ".join(line_str.split()[:3]) 
@@ -199,13 +215,16 @@ def normalize_msds_with_glossary(text: str, glossary: dict) -> str:
         if cleaned_lines and line_str == cleaned_lines[-1].strip():
             continue
             
-        if is_sub_section or line_str.endswith(':'):
+        # НОВОЕ: Если это подраздел, список ИЛИ параметр с двоеточием — строго с новой строки!
+        if is_sub_section or is_key_value or line_str.endswith(':'):
             cleaned_lines.append('\n' + line_str)
         else:
+            # Попытка склеить разорванный текст
             if cleaned_lines and not cleaned_lines[-1].startswith('\n# ') and not cleaned_lines[-1].endswith(':'):
                 prev = cleaned_lines[-1]
                 if line_str not in prev:
-                    if "Product form" in line_str or "CAS-No" in line_str or "Product code" in line_str:
+                    # Если строка короткая, не склеиваем ее сплошным текстом
+                    if len(line_str) < 30:
                         cleaned_lines[-1] = prev + "\n" + line_str
                     else:
                         cleaned_lines[-1] = prev + " " + line_str
