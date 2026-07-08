@@ -3,10 +3,10 @@ import openai
 import pdfplumber
 import io
 import re
-import os
 import zipfile
 import json
 import xml.etree.ElementTree as ET
+from github import Github
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -17,6 +17,22 @@ st.set_page_config(
     page_icon="🧪",
     layout="wide"
 )
+
+# Проверка наличия секретов
+def check_secrets():
+    required_secrets = ["YANDEX_FOLDER_ID", "YANDEX_API_KEY", "GITHUB_TOKEN", "GITHUB_REPO"]
+    missing = [sec for sec in required_secrets if sec not in st.secrets]
+    if missing:
+        st.error(f"Внимание! В файле .streamlit/secrets.toml отсутствуют следующие ключи: {', '.join(missing)}")
+        st.stop()
+
+check_secrets()
+
+# Считываем секреты один раз
+FOLDER_ID = st.secrets["YANDEX_FOLDER_ID"]
+API_KEY = st.secrets["YANDEX_API_KEY"]
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+GITHUB_REPO = st.secrets["GITHUB_REPO"]
 
 def clean_inline_duplicate(text: str) -> str:
     """Удаляет дублирование фраз, склеенных внутри одной строки (например, 'HelloHello')"""
@@ -29,52 +45,64 @@ def clean_inline_duplicate(text: str) -> str:
     return text
 
 def extract_raw_xml_text_from_zip(file_bytes) -> str:
-    """Шаг 1: Низкоуровневое извлечение текста из ZIP-структуры DOCX памяти"""
+    """Глубокое извлечение текста из DOCX, включая текстовые поля и фигуры."""
     WORD_NAMESPACE = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
-    TEXT_TAG = f'{WORD_NAMESPACE}t'
     PARA_TAG = f'{WORD_NAMESPACE}p'
-    NUM_PR_TAG = f'{WORD_NAMESPACE}numPr'
+    TEXT_TAG = f'{WORD_NAMESPACE}t'
+    NUM_PR_TAG = f'.//{WORD_NAMESPACE}numPr'
 
     all_extracted_lines = []
     
     try:
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
-            # Читаем только основной документ и колонтитулы
-            xml_files = [f for f in z.namelist() if f.endswith('.xml') and ('word/document' in f or 'word/header' in f)]
+            xml_files = [f for f in z.namelist() if f.endswith('.xml') and f.startswith('word/')]
             xml_files.sort(key=lambda x: ('document' in x, x))
 
             for xml_file in xml_files:
                 with z.open(xml_file) as f:
                     root = ET.fromstring(f.read())
                     for p in root.iter(PARA_TAG):
-                        prefix = ""
-                        numPr = p.find(f'.//{NUM_PR_TAG}')
-                        if numPr is not None:
-                            prefix = "• "
-                            
+                        prefix = "• " if p.find(NUM_PR_TAG) is not None else ""
                         text_pieces = [node.text for node in p.iter(TEXT_TAG) if node.text]
                         p_text = "".join(text_pieces).strip()
                         p_text = clean_inline_duplicate(p_text)
                         
                         if p_text:
-                            all_extracted_lines.append(f"{prefix}{p_text}")
+                            # Избегаем дублирования идущих подряд одинаковых строк
+                            if not all_extracted_lines or all_extracted_lines[-1] != f"{prefix}{p_text}":
+                                all_extracted_lines.append(f"{prefix}{p_text}")
     except Exception as e:
         st.error(f"Ошибка при XML-парсинге DOCX: {e}")
         return ""
 
     return "\n".join(all_extracted_lines)
 
-# ... здесь заканчивается extract_raw_xml_text_from_zip ...
-
-def generate_dynamic_glossary(raw_text: str, folder_id: str, api_key: str) -> dict:
-    """Проход 1: Анализирует документ, находит заголовки разделов и просит YandexGPT 
-    создать эталонный JSON-словарь именно для этого файла.
-    """
+def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_token: str, github_repo: str) -> dict:
+    """Умное обновление словаря: сверка с GitHub и перевод только новых заголовков."""
     raw_sections = set(re.findall(r'(?im)^[ \t]*(?:section|раздел)\s*\d+.*$', raw_text))
     if not raw_sections:
         return {}
-        
-    sections_list = "\n".join(list(raw_sections))
+
+    g = Github(github_token)
+    repo = g.get_repo(github_repo)
+    file_path = "glossary.json"
+    
+    try:
+        contents = repo.get_contents(file_path)
+        current_glossary = json.loads(contents.decoded_content.decode("utf-8"))
+    except Exception as e:
+        st.warning(f"Не удалось загрузить словарь с GitHub (возможно, его еще нет). Создаем новый. Ошибка: {e}")
+        current_glossary = {}
+        contents = None
+
+    new_sections = [sec for sec in raw_sections if sec not in current_glossary]
+    
+    if not new_sections:
+        return current_glossary
+
+    st.info(f"Найдено {len(new_sections)} новых заголовков. Отправляем в YandexGPT и коммитим в Git...")
+    sections_list = "\n".join(new_sections)
+    
     client = openai.OpenAI(
         api_key=api_key,
         base_url="https://ai.api.cloud.yandex.net/v1",
@@ -82,11 +110,11 @@ def generate_dynamic_glossary(raw_text: str, folder_id: str, api_key: str) -> di
     )
     
     prompt = (
-        "Ты — AI-модуль нормализации technical документации. Тебе дан список заголовков разделов из оригинального MSDS.\n"
-        "Переведи их на русский язык в соответствии со стандартами химической безопасности.\n\n"
+        "Ты — AI-модуль нормализации технической документации. Тебе дан список новых заголовков разделов из MSDS.\n"
+        "Переведи их на русский язык (ГОСТ 30333-2022).\n\n"
         "ОБЯЗАТЕЛЬНОЕ ТРЕБОВАНИЕ: Верни ответ СТРОГО в формате валидного JSON-объекта, "
-        "где КЛЮЧ — это оригинальная строка из списка (без изменений), а ЗНАЧЕНИЕ — её эталонный перевод на русский язык.\n"
-        "Не пиши никаких вступлений, комментариев или markdown-разметки (типа ```json). Только чистый JSON.\n\n"
+        "где КЛЮЧ — это оригинальная строка из списка (без изменений), а ЗНАЧЕНИЕ — её эталонный перевод.\n"
+        "Не пиши никаких вступлений, комментариев или markdown-разметки. Только чистый JSON.\n\n"
         f"Список заголовков для перевода:\n{sections_list}"
     )
     
@@ -97,14 +125,35 @@ def generate_dynamic_glossary(raw_text: str, folder_id: str, api_key: str) -> di
             temperature=0.1
         )
         answer = response.output[0].content[0].text.strip()
-        answer = re.sub(r'```(?:json)?\s*|\s*```', '', answer)
-        return json.loads(answer)
+        
+        # Заменяем тройные обратные кавычки через hex-коды, чтобы не ломать парсер Markdown платформы
+        answer = re.sub(r'\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60', '', answer)
+        new_translations = json.loads(answer)
+        
+        # Склеиваем старый словарь с новыми переводами
+        current_glossary.update(new_translations)
+        
+        # Автоматический коммит в GitHub
+        updated_content = json.dumps(current_glossary, ensure_ascii=False, indent=4)
+        commit_message = f"Авто-обновление глоссария: добавлено {len(new_translations)} терминов"
+        
+        if contents:
+            repo.update_file(contents.path, commit_message, updated_content, contents.sha)
+        else:
+            # Если файла изначально не было, создаем его
+            repo.create_file(file_path, commit_message, updated_content)
+            
+        st.success("Глоссарий успешно обновлен на GitHub!")
+        
+    except json.JSONDecodeError:
+        st.error("YandexGPT вернул невалидный JSON. Обновление словаря отменено, чтобы не сломать репозиторий.")
     except Exception as e:
-        st.warning(f"Не удалось построить динамический глоссарий: {e}. Используем стандартную сборку.")
-        return {}
+        st.error(f"Ошибка при обновлении глоссария: {e}")
+
+    return current_glossary
 
 def normalize_msds_with_glossary(text: str, glossary: dict) -> str:
-    """Проход 2: Заменяет оригинальные заголовки по словарю их перевода и схлопывает дубликаты"""
+    """Заменяет оригинальные заголовки по словарю их перевода и схлопывает дубликаты"""
     if not text.strip():
         return ""
     
@@ -173,7 +222,7 @@ def normalize_msds_with_glossary(text: str, glossary: dict) -> str:
     return re.sub(r'\n\s*\n+', '\n\n', normalized).strip()
 
 def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """Шаг 3: Перевод фрагментов через Yandex GPT на базе истинных SECTION"""
+    """Перевод фрагментов через Yandex GPT на базе истинных SECTION"""
     if not text.strip():
         return ""
     
@@ -249,18 +298,16 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
-def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: str): # ← ДОБАВИЛИ В АРГУМЕНТЫ
-    """Шаг 4: Сборщик Word-документа по ГОСТ-стилистике с премиум-шапкой"""
+def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: str):
+    """Сборщик Word-документа по ГОСТ-стилистике"""
     doc = Document()
     
-    # 1. Настройка полей
     for section in doc.sections:
         section.top_margin = Inches(0.39)
         section.bottom_margin = Inches(0.39)
         section.left_margin = Inches(0.39)
         section.right_margin = Inches(0.39)
         
-        # Верхний колонтитул
         hp = section.header.paragraphs[0]
         hp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         hrun = hp.add_run(f"{product_name_ru} | Паспорт безопасности химической продукции")
@@ -269,7 +316,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
         hrun.font.italic = True
         hrun.font.color.rgb = RGBColor(128, 128, 128)
         
-        # Нижний колонтитул
         fp = section.footer.paragraphs[0]
         fp.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         frun = fp.add_run("www.spanlab.in                                                                                  ")
@@ -277,9 +323,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
         frun.font.size = Pt(8.5)
         frun.font.color.rgb = RGBColor(128, 128, 128)
         
-    # --- ГЕНЕРАЦИЯ ШАПКИ ДОКУМЕНТА (ТЕПЕРЬ НАПРЯМУЮ ИЗ ИНТЕРФЕЙСА) ---
-
-    # Строка 1: Паспорт безопасности материала
     p_header1 = doc.add_paragraph()
     p_header1.paragraph_format.space_before = Pt(0)
     p_header1.paragraph_format.space_after = Pt(2)
@@ -287,9 +330,7 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
     run_h1.bold = True
     run_h1.font.name = 'Arial'
     run_h1.font.size = Pt(16)
-    run_h1.font.color.rgb = RGBColor(0, 0, 0)
-
-    # Строка 2: Название продукта
+    
     p_header2 = doc.add_paragraph()
     p_header2.paragraph_format.space_before = Pt(0)
     p_header2.paragraph_format.space_after = Pt(2)
@@ -297,19 +338,15 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
     run_h2.bold = True
     run_h2.font.name = 'Arial'
     run_h2.font.size = Pt(16)
-    run_h2.font.color.rgb = RGBColor(0, 0, 0)
-
-    # Строка 3: CAS № + Элегантная черная линия снизу абзаца
+    
     p_header3 = doc.add_paragraph()
     p_header3.paragraph_format.space_before = Pt(0)
     p_header3.paragraph_format.space_after = Pt(18)
-    run_h3 = p_header3.add_run(f"CAS № {product_cas.strip()}") # ← ИСПОЛЬЗУЕМ ЗНАЧЕНИЕ ИЗ ИНПУТА
+    run_h3 = p_header3.add_run(f"CAS № {product_cas.strip()}")
     run_h3.bold = True
     run_h3.font.name = 'Arial'
     run_h3.font.size = Pt(16)
-    run_h3.font.color.rgb = RGBColor(0, 0, 0)
-
-    # Магия XML: добавляем тонкую черную горизонтальную линию под третьим абзацем шапки
+    
     pPr = p_header3._p.get_or_add_pPr()
     pBdr = OxmlElement('w:pBdr')
     bottom = OxmlElement('w:bottom')
@@ -320,9 +357,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
     pBdr.append(bottom)
     pPr.append(pBdr)
 
-    # --- КОНЕЦ ШАПКИ ---
-
-    # 2. Сборка основного контента
     DARK_BLUE = RGBColor(0, 51, 102)
     lines = markdown_text.split('\n')
     
@@ -372,21 +406,37 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
     bio.seek(0)
     return bio
 
-# --- Интерфейс Streamlit ---
-st.title("🧪 MSDS Translator — Premium AI Studio")
-st.caption("Пошаговый конвейер.")
+def render_glossary_tab():
+    """Вкладка с интерактивной таблицей для управления глоссарием на GitHub"""
+    st.header("Управление глоссарием")
+    st.caption("Здесь вы можете просматривать, изменять и удалять записи словаря. Изменения автоматически улетят на GitHub.")
+    
+    try:
+        g = Github(GITHUB_TOKEN)
+        repo = g.get_repo(GITHUB_REPO)
+        contents = repo.get_contents("glossary.json")
+        glossary_data = json.loads(contents.decoded_content.decode("utf-8"))
+        
+        data_list = [{"Оригинал (English)": k, "Перевод (Russian)": v} for k, v in glossary_data.items()]
+        
+        edited_df = st.data_editor(data_list, use_container_width=True, num_rows="dynamic")
+        
+        if st.button("💾 Сохранить изменения в словаре", type="primary"):
+            updated_dict = {row["Оригинал (English)"]: row["Перевод (Russian)"] for row in edited_df if row["Оригинал (English)"]}
+            new_content = json.dumps(updated_dict, ensure_ascii=False, indent=4)
+            
+            repo.update_file(
+                contents.path, 
+                "Ручное редактирование глоссария через интерфейс", 
+                new_content, 
+                contents.sha
+            )
+            st.success("Словарь успешно обновлен на GitHub! Изменения применятся к следующим переводам.")
+            
+    except Exception as e:
+        st.error(f"Не удалось загрузить данные с GitHub. Проверьте правильность токена и репозитория. Ошибка: {e}")
 
-st.divider()
-
-st.sidebar.header("Доступ к Yandex AI Studio")
-folder_id = st.sidebar.text_input("Yandex Folder ID", type="password")
-api_key = st.sidebar.text_input("Yandex API Key", type="password")
-
-st.sidebar.markdown("---")
-st.sidebar.header("Продукт")
-product_name_ru = st.sidebar.text_input("Официальное название продукта (RU):", value="ТРИМЕТИЛОЛПРОПАН")
-product_cas = st.sidebar.text_input("Номер CAS:", value="77-99-6")
-
+# --- Инициализация состояния ---
 if "raw_text" not in st.session_state:
     st.session_state.raw_text = ""
 if "normalized_text" not in st.session_state:
@@ -401,87 +451,101 @@ def reset_state():
     st.session_state.normalized_text = ""
     st.session_state.translated_text = ""
 
-# --- ШАГ 1 ---
-st.header("Шаг 1: Загрузка исходного MSDS (EN)")
-input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / PDF / TXT)", "Вставить текст вручную"), on_change=reset_state)
+# --- Основной Интерфейс ---
+st.title("🧪 MSDS Translator — Premium AI Studio")
 
-if input_method == "Вставить текст вручную":
-    inserted_text = st.text_area("Вставьте текст MSDS на английском языке:", height=250, placeholder="SECTION 1: Identification...")
-    if inserted_text:
-        st.session_state.raw_text = inserted_text
-else:
-    uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
-    if uploaded_file is not None:
-        st.session_state.file_name_output = f"{uploaded_file.name}_RU"
-        if uploaded_file.name.endswith(".txt"):
-            st.session_state.raw_text = str(uploaded_file.read(), "utf-8")
-        elif uploaded_file.name.endswith(".docx"):
-            # Применяем наш ядерный XML парсер напрямую к байтам
-            st.session_state.raw_text = extract_raw_xml_text_from_zip(uploaded_file.read())
-        elif uploaded_file.name.endswith(".pdf"):
-            with pdfplumber.open(io.BytesIO(uploaded_file.read())) as pdf:
-                st.session_state.raw_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+# Разбиваем на две вкладки
+tab_main, tab_glossary = st.tabs(["🔄 Переводчик MSDS", "📚 Редактор глоссария"])
 
-if st.session_state.raw_text:
-    with st.expander("Просмотр извлеченного оригинального текста (Шаг 1)", expanded=True):
-        st.text_area("Оригинал без изменений:", value=st.session_state.raw_text, height=200, disabled=True, key="raw_preview")
+with tab_main:
+    st.sidebar.header("Параметры продукта")
+    product_name_ru = st.sidebar.text_input("Официальное название продукта (RU):", value="ТРИМЕТИЛОЛПРОПАН")
+    product_cas = st.sidebar.text_input("Номер CAS:", value="77-99-6")
 
-st.divider()
+    # --- ШАГ 1 ---
+    st.header("Шаг 1: Загрузка исходного MSDS (EN)")
+    input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / PDF / TXT)", "Вставить текст вручную"), on_change=reset_state)
 
-# --- ШАГ 2 ---
-# --- Ищи этот блок в районе 220+ строки ---
-st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
-st.caption("Фильтрует дубли, склеивает разорванные ячейки и блокирует ложные переходы по ссылкам.")
+    if input_method == "Вставить текст вручную":
+        inserted_text = st.text_area("Вставьте текст MSDS на английском языке:", height=250, placeholder="SECTION 1: Identification...")
+        if inserted_text:
+            st.session_state.raw_text = inserted_text
+    else:
+        uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
+        if uploaded_file is not None:
+            st.session_state.file_name_output = f"{uploaded_file.name}_RU"
+            if uploaded_file.name.endswith(".txt"):
+                st.session_state.raw_text = str(uploaded_file.read(), "utf-8")
+            elif uploaded_file.name.endswith(".docx"):
+                st.session_state.raw_text = extract_raw_xml_text_from_zip(uploaded_file.read())
+            elif uploaded_file.name.endswith(".pdf"):
+                with pdfplumber.open(io.BytesIO(uploaded_file.read())) as pdf:
+                    st.session_state.raw_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
 
-if st.button("🔧 Запустить нормализацию текста", type="secondary", use_container_width=True):
     if st.session_state.raw_text:
-        # 1. Сначала под капотом создаем глоссарий под этого конкретного производителя
-        with st.spinner("Анализ документа и построение индивидуального глоссария..."):
-            glossary = generate_dynamic_glossary(st.session_state.raw_text, folder_id, api_key)
-            
-        # 2. Передаем глоссарий в нормализатор структуры
-        with st.spinner("Выравнивание структуры и удаление дубликатов..."):
-            st.session_state.normalized_text = normalize_msds_with_glossary(st.session_state.raw_text, glossary)
-            
-        st.success("Успех!")
-    else:
-        st.warning("Сначала загрузите или вставьте исходный текст на Шаге 1.")
+        with st.expander("Просмотр извлеченного оригинального текста (Шаг 1)", expanded=False):
+            st.text_area("Оригинал без изменений:", value=st.session_state.raw_text, height=200, disabled=True, key="raw_preview")
 
-st.divider()
+    st.divider()
 
-# --- ШАГ 3 ---
-st.header("Шаг 3: Перевод через YandexGPT")
+    # --- ШАГ 2 ---
+    st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
+    st.caption("Автоматически сверяется с глоссарием на GitHub, добавляет новые заголовки и выравнивает текст.")
 
-if st.button("Выполнить перевод", type="primary", use_container_width=True):
-    if not folder_id or not api_key:
-        st.warning("Пожалуйста, введите Yandex Folder ID и API Key в боковой панели.")
-    elif st.session_state.normalized_text:
-        with st.spinner("YandexGPT переводит документ..."):
-            st.session_state.translated_text = translate_msds_with_studio(
-                st.session_state.normalized_text, folder_id, api_key, product_name_ru
+    if st.button("🔧 Запустить нормализацию текста", type="secondary", use_container_width=True):
+        if st.session_state.raw_text:
+            with st.spinner("Сверка словаря с GitHub и анализ документа..."):
+                glossary = get_and_update_glossary(
+                    st.session_state.raw_text, 
+                    FOLDER_ID, 
+                    API_KEY, 
+                    GITHUB_TOKEN,
+                    GITHUB_REPO
+                )
+                
+            with st.spinner("Выравнивание структуры и удаление дубликатов..."):
+                st.session_state.normalized_text = normalize_msds_with_glossary(st.session_state.raw_text, glossary)
+                
+            st.success("Успех! Текст нормализован.")
+        else:
+            st.warning("Сначала загрузите или вставьте исходный текст на Шаге 1.")
+
+    st.divider()
+
+    # --- ШАГ 3 ---
+    st.header("Шаг 3: Перевод через YandexGPT")
+
+    if st.button("Выполнить перевод", type="primary", use_container_width=True):
+        if st.session_state.normalized_text:
+            with st.spinner("YandexGPT переводит документ..."):
+                st.session_state.translated_text = translate_msds_with_studio(
+                    st.session_state.normalized_text, FOLDER_ID, API_KEY, product_name_ru
+                )
+            st.success("Перевод завершен!")
+        else:
+            st.warning("Нечего переводить. Сначала выполните Шаг 2.")
+
+    if st.session_state.translated_text:
+        with st.expander("Предпросмотр готового перевода Markdown (Шаг 3)", expanded=True):
+            st.markdown(st.session_state.translated_text)
+
+    st.divider()
+
+    # --- ШАГ 4 ---
+    st.header("Шаг 4: Экспорт в Word")
+
+    if st.session_state.translated_text:
+        if "Ошибка" not in st.session_state.translated_text:
+            docx_data = make_formatted_docx(st.session_state.translated_text, product_name_ru, product_cas)
+            st.download_button(
+                label="Скачать отформатированный файл WORD (.docx)",
+                data=docx_data,
+                file_name=st.session_state.file_name_output if st.session_state.file_name_output.endswith(".docx") else f"{st.session_state.file_name_output}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
             )
-        st.success("Перевод завершен!")
     else:
-        st.warning("Нечего переводить. Сначала выполните Шаг 2.")
+        st.info("Кнопка скачивания появится здесь, когда Шаг 3 будет успешно выполнен.")
 
-if st.session_state.translated_text:
-    with st.expander("Предпросмотр готового перевода Markdown (Шаг 3)", expanded=True):
-        st.markdown(st.session_state.translated_text)
-
-st.divider()
-
-# --- ШАГ 4 ---
-st.header("Шаг 4: Экспорт в Word")
-
-if st.session_state.translated_text:
-    if "Ошибка" not in st.session_state.translated_text:
-        docx_data = make_formatted_docx(st.session_state.translated_text, product_name_ru, product_cas)
-        st.download_button(
-            label="Скачать отформатированный файл WORD (.docx)",
-            data=docx_data,
-            file_name=st.session_state.file_name_output if st.session_state.file_name_output.endswith(".docx") else f"{st.session_state.file_name_output}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True
-        )
-else:
-    st.info("Кнопка скачивания появится здесь, когда Шаг 3 будет успешно выполнен.")
+with tab_glossary:
+    render_glossary_tab()
