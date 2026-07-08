@@ -18,21 +18,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# Проверка наличия секретов
-def check_secrets():
-    required_secrets = ["YANDEX_FOLDER_ID", "YANDEX_API_KEY", "GITHUB_TOKEN", "GITHUB_REPO"]
-    missing = [sec for sec in required_secrets if sec not in st.secrets]
-    if missing:
-        st.error(f"Внимание! В файле .streamlit/secrets.toml отсутствуют следующие ключи: {', '.join(missing)}")
-        st.stop()
+# --- Автоматическое чтение конфигураций из Streamlit Secrets ---
+yandex_secrets = st.secrets.get("yandex", {})
+FOLDER_ID = yandex_secrets.get("folder_id", "")
+API_KEY = yandex_secrets.get("api_key", "")
 
-check_secrets()
+github_secrets = st.secrets.get("github", {})
+GITHUB_TOKEN = github_secrets.get("token", "")
+GITHUB_REPO = github_secrets.get("repo", "")
 
-# Считываем секреты один раз
-FOLDER_ID = st.secrets["YANDEX_FOLDER_ID"]
-API_KEY = st.secrets["YANDEX_API_KEY"]
-GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-GITHUB_REPO = st.secrets["GITHUB_REPO"]
 
 def clean_inline_duplicate(text: str) -> str:
     """Удаляет дублирование фраз, склеенных внутри одной строки (например, 'HelloHello')"""
@@ -83,6 +77,10 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
     if not raw_sections:
         return {}
 
+    if not github_token or not github_repo:
+        st.error("GitHub токен или репозиторий не настроены в Secrets!")
+        return {}
+
     g = Github(github_token)
     repo = g.get_repo(github_repo)
     file_path = "glossary.json"
@@ -91,7 +89,7 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
         contents = repo.get_contents(file_path)
         current_glossary = json.loads(contents.decoded_content.decode("utf-8"))
     except Exception as e:
-        st.warning(f"Не удалось загрузить словарь с GitHub (возможно, его еще нет). Создаем новый. Ошибка: {e}")
+        st.warning(f"Не удалось загрузить словарь с GitHub. Создаем новый. Ошибка: {e}")
         current_glossary = {}
         contents = None
 
@@ -110,7 +108,7 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
     )
     
     prompt = (
-        "Ты — AI-модуль нормализации технической документации. Тебе дан список новых заголовков разделов из MSDS.\n"
+        "Ты — AI-модуль normalisation технической документации. Тебе дан список новых заголовков разделов из MSDS.\n"
         "Переведи их на русский язык (ГОСТ 30333-2022).\n\n"
         "ОБЯЗАТЕЛЬНОЕ ТРЕБОВАНИЕ: Верни ответ СТРОГО в формате валидного JSON-объекта, "
         "где КЛЮЧ — это оригинальная строка из списка (без изменений), а ЗНАЧЕНИЕ — её эталонный перевод.\n"
@@ -126,27 +124,23 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
         )
         answer = response.output[0].content[0].text.strip()
         
-        # Заменяем тройные обратные кавычки через hex-коды, чтобы не ломать парсер Markdown платформы
+        # Безопасное регулярное выражение с шестнадцатеричными кодами обратных кавычек
         answer = re.sub(r'\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60', '', answer)
         new_translations = json.loads(answer)
         
-        # Склеиваем старый словарь с новыми переводами
         current_glossary.update(new_translations)
-        
-        # Автоматический коммит в GitHub
         updated_content = json.dumps(current_glossary, ensure_ascii=False, indent=4)
         commit_message = f"Авто-обновление глоссария: добавлено {len(new_translations)} терминов"
         
         if contents:
             repo.update_file(contents.path, commit_message, updated_content, contents.sha)
         else:
-            # Если файла изначально не было, создаем его
             repo.create_file(file_path, commit_message, updated_content)
             
         st.success("Глоссарий успешно обновлен на GitHub!")
         
     except json.JSONDecodeError:
-        st.error("YandexGPT вернул невалидный JSON. Обновление словаря отменено, чтобы не сломать репозиторий.")
+        st.error("YandexGPT вернул невалидный JSON. Обновление словаря отменено.")
     except Exception as e:
         st.error(f"Ошибка при обновлении глоссария: {e}")
 
@@ -226,6 +220,10 @@ def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_
     if not text.strip():
         return ""
     
+    if not folder_id or not api_key:
+        st.error("Yandex Folder ID или API Key не настроены в Secrets!")
+        return "Ошибка: Отсутствуют ключи авторизации Yandex."
+        
     client = openai.OpenAI(
         api_key=api_key,
         base_url="https://ai.api.cloud.yandex.net/v1",
@@ -411,6 +409,10 @@ def render_glossary_tab():
     st.header("Управление глоссарием")
     st.caption("Здесь вы можете просматривать, изменять и удалять записи словаря. Изменения автоматически улетят на GitHub.")
     
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        st.error("GitHub конфигурации не найдены в Streamlit Secrets!")
+        return
+
     try:
         g = Github(GITHUB_TOKEN)
         repo = g.get_repo(GITHUB_REPO)
@@ -434,7 +436,7 @@ def render_glossary_tab():
             st.success("Словарь успешно обновлен на GitHub! Изменения применятся к следующим переводам.")
             
     except Exception as e:
-        st.error(f"Не удалось загрузить данные с GitHub. Проверьте правильность токена и репозитория. Ошибка: {e}")
+        st.error(f"Не удалось загрузить данные с GitHub. Ошибка: {e}")
 
 # --- Инициализация состояния ---
 if "raw_text" not in st.session_state:
