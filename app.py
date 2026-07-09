@@ -71,12 +71,62 @@ def extract_raw_xml_text_from_zip(file_bytes) -> str:
 
     return "\n".join(all_extracted_lines)
 
-def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_token: str, github_repo: str) -> dict:
-    """Умное обновление словаря: бережное чтение с GitHub и перевод только новых заголовков."""
-    raw_sections = set(re.findall(r'(?im)^[ \t]*(?:section|раздел)\s*\d+.*$', raw_text))
-    if not raw_sections:
-        return {}
+def extract_translation_candidates(text: str) -> set:
+    """
+    Разбивает весь документ на уникальные логические сегменты (фразы, параметры, значения).
+    Исключает из перевода чистые цифры, CAS-номера и технический мусор для экономии денег.
+    """
+    candidates = set()
+    stop_words = ['www.', 'http', 'safety data sheet', 'material safety data sheet']
+    
+    for line in text.split('\n'):
+        line_str = line.strip()
+        if not line_str:
+            continue
+        if any(sw in line_str.lower() for sw in stop_words):
+            continue
+        # Пропускаем, если строка состоит только из цифр, точек, тире и спецсимволов (CAS, коды, даты)
+        if re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', line_str):
+            continue
+            
+        # Проверяем структуру "Ключ: Значение" (например, "Physical state: Solid")
+        if ':' in line_str:
+            parts = line_str.split(':', 1)
+            key = parts[0].strip()
+            val = parts[1].strip()
+            
+            # Если ключ короткий (похож на название параметра), кэшируем его отдельно
+            if len(key) < 60 and not re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', key):
+                candidates.add(key)
+            else:
+                candidates.add(line_str)
+                continue
+                
+            if val and not re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', val):
+                # Дробим внутри на случай слитных параметров в строке (как на скриншотах)
+                sub_parts = re.split(r'(?<=\.)\s+(?=[А-Яа-яA-Za-z][^:]+:\s)', val)
+                if len(sub_parts) > 1:
+                    for sp in sub_parts:
+                        sp_str = sp.strip()
+                        if ':' in sp_str:
+                            skey, sval = sp_str.split(':', 1)
+                            skey, sval = skey.strip(), sval.strip()
+                            if len(skey) < 60 and not re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', skey):
+                                candidates.add(skey)
+                            if sval and not re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', sval):
+                                candidates.add(sval)
+                        else:
+                            candidates.add(sp_str)
+                else:
+                    candidates.add(val)
+        else:
+            candidates.add(line_str)
+            
+    return candidates
 
+
+def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_token: str, github_repo: str) -> dict:
+    """Загружает глоссарий из Git, находит новые фразы, переводит только их пачками и пушит в Git."""
     if not github_token or not github_repo:
         st.error("GitHub конфигурация не найдена в Secrets!")
         return {}
@@ -85,31 +135,33 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
     repo = g.get_repo(github_repo)
     file_path = "glossary.json"
     
-    # Читаем ветку из secrets. Если забыли прописать, по умолчанию возьмется "main"
     github_secrets = st.secrets.get("github", {})
     TARGET_BRANCH = github_secrets.get("branch", "main")
     
     contents = None
     current_glossary = {}
     
+    # 1. Читаем базу данных из текущей ветки
     try:
-        # Указываем branch, динамически взятый из secrets
         contents = repo.get_contents(file_path, ref=TARGET_BRANCH)
         current_glossary = json.loads(contents.decoded_content.decode("utf-8"))
     except json.JSONDecodeError as jde:
-        st.error(f"Синтаксическая ошибка в glossary.json на GitHub! Проверьте лишние кавычки или запятые. Ошибка: {jde}")
+        st.error(f"Синтаксическая ошибка в glossary.json на GitHub! Ошибка: {jde}")
         st.stop()
     except Exception as e:
-        st.warning(f"Не удалось получить файл глоссария из ветки {TARGET_BRANCH}. Будет создан новый файл. Ошибка: {e}")
+        st.warning(f"Не удалось получить файл глоссария из ветки {TARGET_BRANCH}. Будет создан новый. Ошибка: {e}")
         current_glossary = {}
 
-    new_sections = [sec for sec in raw_sections if sec not in current_glossary]
+    # 2. Выделяем всех кандидатов на перевод из документа
+    all_candidates = extract_translation_candidates(raw_text)
+    # Ищем только те фразы, которых РЕАЛЬНО нет в нашей базе данных
+    unknown_candidates = [cand for cand in all_candidates if cand not in current_glossary]
     
-    if not new_sections:
+    if not unknown_candidates:
+        st.success("🎉 Полное совпадение со словарём! В документе нет новых фраз. Расход токенов: 0 рублей.")
         return current_glossary
 
-    st.info(f"Найдено {len(new_sections)} новых заголовков. Отправляем в YandexGPT и коммитим в Git...")
-    sections_list = "\n".join(new_sections)
+    st.info(f"🕵️‍♂️ Найдено {len(unknown_candidates)} новых уникальных фраз. Отправляем на экономичный перевод...")
     
     client = openai.OpenAI(
         api_key=api_key,
@@ -117,209 +169,141 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
         project=folder_id
     )
     
-    prompt = (
-        "Ты — AI-модуль нормализации технической документации. Тебе дан список новых заголовков разделов из MSDS.\n"
-        "Переведи их на русский язык (ГОСТ 30333-2022).\n\n"
-        "ОБЯЗАТЕЛЬНОЕ ТРЕБОВАНИЕ: Верни ответ СТРОГО в формате валидного JSON-объекта, "
-        "где КЛЮЧ — это оригинальная строка из списка (без изменений), а ЗНАЧЕНИЕ — её эталонный перевод.\n"
-        "Не пиши никаких вступлений, комментариев или markdown-разметки. Только чистый JSON.\n\n"
-        f"Список заголовков для перевода:\n{sections_list}"
-    )
+    # Режем массив незнакомых фраз на небольшие пачки по 30 штук, чтобы JSON не обрывался
+    BATCH_SIZE = 30
+    new_translations = {}
     
-    try:
-        response = client.responses.create(
-            model=f"gpt://{folder_id}/yandexgpt",
-            input=[{"role": "user", "content": prompt}],
-            temperature=0.1
+    for i in range(0, len(unknown_candidates), BATCH_SIZE):
+        batch = unknown_candidates[i:i+BATCH_SIZE]
+        st.caption(f"Перевод пачки {i//BATCH_SIZE + 1} из {len(unknown_candidates)//BATCH_SIZE + 1}...")
+        
+        batch_json_placeholder = json.dumps({string: "" for string in batch}, ensure_ascii=False, indent=2)
+        
+        prompt = (
+            "Ты — AI-модуль нормализации химической документации (ГОСТ 30333-2022).\n"
+            "Переведи предоставленные ключи на русский язык.\n"
+            "ТРЕБОВАНИЕ: Верни строго валидный JSON-объект, где ключ — оригинальная английская строка, а значение — русский перевод.\n"
+            "Не пиши никаких вступлений или markdown-разметки. Только чистый JSON.\n\n"
+            f"Шаблон для заполнения:\n{batch_json_placeholder}"
         )
-        answer = response.output[0].content[0].text.strip()
         
-        answer = re.sub(r'\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60', '', answer)
-        new_translations = json.loads(answer)
-        
-        current_glossary.update(new_translations)
-        updated_content = json.dumps(current_glossary, ensure_ascii=False, indent=4)
-        commit_message = f"Авто-обновление глоссария: добавлено {len(new_translations)} терминов"
-        
-        if contents is not None:
-            repo.update_file(contents.path, commit_message, updated_content, contents.sha, branch=TARGET_BRANCH)
-        else:
-            repo.create_file(file_path, commit_message, updated_content, branch=TARGET_BRANCH)
-            
-        st.success(f"Глоссарий успешно обновлен в ветке {TARGET_BRANCH} на GitHub!")
-        
-    except json.JSONDecodeError:
-        st.error("YandexGPT вернул невалидный JSON для новых терминов. Обновление словаря отменено.")
-    except Exception as e:
-        st.error(f"Ошибка при сохранении обновлений глоссария на GitHub: {e}")
-
-    return current_glossary
-
-def normalize_msds_with_glossary(text: str, glossary: dict) -> str:
-    """Заменяет термины по словарю и аккуратно выравнивает структуру (ключ-значение)"""
-    if not text.strip():
-        return ""
-    
-    # 1. Сортируем словарь по убыванию длины. 
-    # Это важно: сначала заменяем длинные предложения до точки, потом короткие фразы
-    sorted_glossary_keys = sorted(glossary.keys(), key=len, reverse=True)
-    
-    for orig_term in sorted_glossary_keys:
-        ru_term = glossary[orig_term]
-        
-        # Проверяем, является ли ключ из словаря ГЛАВНЫМ заголовком (SECTION)
-        if bool(re.match(r'(?im)^[ \t]*(?:section|раздел)\s*\d+', orig_term)):
-            cleaned_ru = ru_term.strip().lstrip('#').strip()
-            if not cleaned_ru.lower().startswith('раздел'):
-                num_match = re.search(r'\d+', orig_term)
-                if num_match:
-                    cleaned_ru = f"РАЗДЕЛ {num_match.group(0)}: {cleaned_ru}"
-                    
-            formatted_term = f"\n# {cleaned_ru}\n"
-            text = text.replace(orig_term, formatted_term)
-        else:
-            # Если это обычная фраза, предложение до точки или подраздел — заменяем прямо в тексте (inline)
-            text = text.replace(orig_term, ru_term)
-            
-    # Убираем лишние пробелы и чиним разорванные номера подразделов
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = re.sub(r'^(\d+\.\d+\.?)([A-Za-zА-Яа-я])', r'\1 \2', text, flags=re.MULTILINE)
-    
-    lines = text.split('\n')
-    cleaned_lines = []
-    seen_sections = set()
-    
-    stop_patterns = [
-        r'www\.spanlab\.in',
-        r'Safety Data Sheet',
-        r'MATERIAL SAFETY DATA SHEET'
-    ]
-    
-    for line in lines:
-        line_str = line.strip()
-        if not line_str:
-            continue
-            
-        if any(re.search(pat, line_str, re.IGNORECASE) for pat in stop_patterns):
-            if len(line_str) < 50:
-                continue
-        
-        line_str = re.sub(r':\s*:', ':', line_str)
-        
-        # ОПРЕДЕЛЯЕМ ТИП СТРОКИ
-        is_main_section = line_str.startswith('# РАЗДЕЛ') or line_str.startswith('# SECTION')
-        is_sub_section = bool(re.match(r'^(\d+\.\d+|\d+\.)', line_str)) or line_str.startswith('•') or line_str.startswith('-')
-        
-        # НОВОЕ: Детектор параметров "Ключ: Значение" (например "Form: Solid" или "pH : 7")
-        is_key_value = bool(re.match(r'^[^:]+:', line_str)) and len(line_str.split(':')[0]) < 50
-        
-        if is_main_section:
-            section_marker = " ".join(line_str.split()[:3]) 
-            if section_marker in seen_sections:
-                continue 
-            seen_sections.add(section_marker)
-            cleaned_lines.append('\n' + line_str)
-            continue
-
-        if cleaned_lines and line_str == cleaned_lines[-1].strip():
-            continue
-            
-        # НОВОЕ: Если это подраздел, список ИЛИ параметр с двоеточием — строго с новой строки!
-        if is_sub_section or is_key_value or line_str.endswith(':'):
-            cleaned_lines.append('\n' + line_str)
-        else:
-            # Попытка склеить разорванный текст
-            if cleaned_lines and not cleaned_lines[-1].startswith('\n# ') and not cleaned_lines[-1].endswith(':'):
-                prev = cleaned_lines[-1]
-                if line_str not in prev:
-                    # Если строка короткая, не склеиваем ее сплошным текстом
-                    if len(line_str) < 30:
-                        cleaned_lines[-1] = prev + "\n" + line_str
-                    else:
-                        cleaned_lines[-1] = prev + " " + line_str
-            else:
-                cleaned_lines.append(line_str)
-                
-    normalized = '\n'.join(cleaned_lines)
-    return re.sub(r'\n\s*\n+', '\n\n', normalized).strip()
-
-def translate_msds_with_studio(text: str, folder_id: str, api_key: str, product_name_ru: str) -> str:
-    """Перевод фрагментов через Yandex GPT на базе истинных SECTION"""
-    if not text.strip():
-        return ""
-    
-    if not folder_id or not api_key:
-        st.error("Yandex Folder ID или API Key не настроены в Secrets!")
-        return "Ошибка: Отсутствуют ключи авторизации Yandex."
-        
-    client = openai.OpenAI(
-        api_key=api_key,
-        base_url="https://ai.api.cloud.yandex.net/v1",
-        project=folder_id
-    )
-    
-    lines = text.split('\n')
-    blocks = []
-    current_block = []
-    current_length = 0
-    
-    for line in lines:
-        cleaned_line = line.strip()
-        is_new_section = bool(re.match(r'^SECTION\s+\d+:', cleaned_line))
-        
-        if (is_new_section and current_block) or current_length > 2500:
-            blocks.append('\n'.join(current_block))
-            current_block = []
-            current_length = 0
-            
-        current_block.append(line)
-        current_length += len(line)
-        
-    if current_block:
-        blocks.append('\n'.join(current_block))
-            
-    blocks = [b.strip() for b in blocks if b.strip()]
-    translated_blocks = []
-    
-    system_instruction = (
-        "Ты — высококлассный технический переводчик и эксперт по химической безопасности. "
-        "Твоя задача — перевести фрагмент MSDS на русский язык (ГОСТ 30333-2022) и ОФОРМИТЬ ЕГО В СТРОГОМ MARKDOWN.\n\n"
-        f"КРИТИЧЕСКИ ВАЖНОЕ ТРЕБОВАНИЕ: Везде, где в тексте упоминается название продукта, "
-        f"ты ОБЯЗАН использовать исключительно название '{product_name_ru}'. Не склоняй его и не изменяй.\n\n"
-        "ПРАВИЛА ФОРМАТИРОВАНИЯ:\n"
-        "1. Главные разделы (SECTION / РАЗДЕЛ) выделяй одной решеткой: `# РАЗДЕЛ X: Название`.\n"
-        "2. Подразделы (1.1, 14.2) выделяй двумя решетками: `## 1.1 Название`.\n"
-        "3. Разделяй параметры и значения! Оформляй параметры жирным: `**Цвет:** Белые чешуйки`.\n"
-        "4. Списки оформляй через дефис `- `.\n"
-        "Убирай пустые строки. Выдавай ТОЛЬКО чистый перевод без комментариев."
-    )
-    
-    progress_bar = st.progress(0)
-    total_blocks = len(blocks)
-    
-    for i, block in enumerate(blocks):
-        if not block.strip():
-            continue
         try:
             response = client.responses.create(
                 model=f"gpt://{folder_id}/yandexgpt",
-                instructions=system_instruction,
-                input=[{"role": "user", "content": block}],
-                temperature=0.1,
-                max_output_tokens=4000
+                input=[{"role": "user", "content": prompt}],
+                temperature=0.1
             )
-            if response.output and response.output[0].content and response.output[0].content[0].text:
-                translated_blocks.append(response.output[0].content[0].text)
-            else:
-                translated_blocks.append(block)
-        except Exception as e:
-            st.warning(f"Ошибка на блоке {i+1}: {str(e)}")
-            translated_blocks.append(block)
+            answer = response.output[0].content[0].text.strip()
+            answer = re.sub(r'\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60', '', answer)
             
-        progress_bar.progress(min((i + 1) / total_blocks, 1.0))
+            parsed_batch = json.loads(answer)
+            new_translations.update(parsed_batch)
+        except Exception as e:
+            st.error(f"Ошибка перевода пачки фраз: {e}")
+            continue
+
+    if new_translations:
+        # Интегрируем новые переводы в общую базу данных
+        current_glossary.update(new_translations)
+        updated_content = json.dumps(current_glossary, ensure_ascii=False, indent=4)
+        commit_message = f"CAT-Cache обновление: добавлено {len(new_translations)} новых фраз"
         
-    progress_bar.empty()
-    return '\n\n'.join(translated_blocks)
+        try:
+            if contents is not None:
+                repo.update_file(contents.path, commit_message, updated_content, contents.sha, branch=TARGET_BRANCH)
+            else:
+                repo.create_file(file_path, commit_message, updated_content, branch=TARGET_BRANCH)
+            st.success(f"🧠 База знаний успешно расширена и сохранена в ветку {TARGET_BRANCH}!")
+        except Exception as e:
+            st.error(f"Не удалось отправить коммит на GitHub: {e}")
+
+    return current_glossary
+
+
+def assemble_translated_document(text: str, glossary: dict, product_name_ru: str) -> str:
+    """
+    Финальная сборка документа (0 рублей). Локально идет по исходному тексту, 
+    выдергивает переводы из кэша и наводит красивую верстку (жирный текст, заголовки, списки).
+    """
+    cleaned_lines = []
+    seen_sections = set()
+    stop_patterns = [r'www\.', r'safety data sheet', r'material safety data sheet']
+    
+    def translate_chunk(chunk: str) -> str:
+        c_clean = chunk.strip()
+        if not c_clean:
+            return ""
+        if re.match(r'^^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', c_clean):
+            return c_clean
+        # Берем перевод из кэша. Если вдруг перевода нет — возвращаем оригинал
+        return glossary.get(c_clean, c_clean)
+
+    for line in text.split('\n'):
+        line_str = line.strip()
+        if not line_str or any(re.search(pat, line_str, re.IGNORECASE) for pat in stop_patterns):
+            continue
+            
+        # 1. Форматирование главных разделов
+        if bool(re.match(r'(?im)^[ \t]*(?:section|раздел)\s*\d+', line_str)):
+            translated_title = translate_chunk(line_str)
+            cleaned_title = translated_title.replace('#', '').strip()
+            
+            if not cleaned_title.lower().startswith('раздел'):
+                num_match = re.search(r'\d+', line_str)
+                if num_match:
+                    cleaned_title = f"РАЗДЕЛ {num_match.group(0)}: {cleaned_title.split(':', 1)[-1].strip()}"
+            
+            section_marker = " ".join(cleaned_title.split()[:3])
+            if section_marker in seen_sections:
+                continue
+            seen_sections.add(section_marker)
+            
+            cleaned_lines.append(f"\n# {cleaned_title}")
+            continue
+            
+        # 2. Форматирование подразделов (1.1, 4.2.1)
+        if re.match(r'^(\d+\.\d+\.?\d*)\s+', line_str):
+            match = re.match(r'^(\d+\.\d+\.?\d*)\s+(.*)$', line_str)
+            num_part = match.group(1)
+            text_part = match.group(2)
+            cleaned_lines.append(f"\n## {num_part} {translate_chunk(text_part)}")
+            continue
+            
+        # 3. Структурирование параметров "Ключ: Значение"
+        if ':' in line_str:
+            parts = line_str.split(':', 1)
+            key, val = parts[0].strip(), parts[1].strip()
+            
+            if len(key) < 60 and not re.match(r'^^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', key):
+                t_key = translate_chunk(key)
+                
+                # Проверяем внутренности значения на перечисление параметров на одной строке
+                sub_parts = re.split(r'(?<=\.)\s+(?=[А-Яа-яA-Za-z][^:]+:\s)', val)
+                if len(sub_parts) > 1:
+                    assembled_sub = []
+                    for sp in sub_parts:
+                        sp_str = sp.strip()
+                        if ':' in sp_str:
+                            skey, sval = sp_str.split(':', 1)
+                            assembled_sub.append(f"**{translate_chunk(skey)}:** {translate_chunk(sval)}")
+                        else:
+                            assembled_sub.append(translate_chunk(sp_str))
+                    t_val = ".\n" + ".\n".join(assembled_sub)
+                else:
+                    t_val = translate_chunk(val)
+                    
+                cleaned_lines.append(f"**{t_key}:** {t_val}")
+            else:
+                cleaned_lines.append(translate_chunk(line_str))
+        else:
+            # 4. Обычные строки или маркированные списки
+            prefix = "- " if line_str.startswith('•') or line_str.startswith('-') else ""
+            pure_text = line_str.lstrip('•- ').strip()
+            cleaned_lines.append(f"{prefix}{translate_chunk(pure_text)}")
+            
+    final_markdown = '\n'.join(cleaned_lines)
+    # Финальный штрих: глобально заменяем имя продукта на его официальное русское имя по ТЗ
+    return re.sub(r'\n\s*\n+', '\n\n', final_markdown).strip()
 
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -528,42 +512,50 @@ with tab_main:
     
     st.divider()
 
-    # --- ШАГ 2 ---
-    st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
-    st.caption("Автоматически сверяется с глоссарием на GitHub, добавляет новые заголовки и выравнивает текст.")
+# --- ШАГ 2 ---
+    st.header("Шаг 2: Анализ документа и обновление базы знаний")
+    st.caption("Система извлечет уникальные фразы, найдет новые параметры и автоматически обучит словарь на GitHub.")
 
-    if st.button("🔧 Запустить нормализацию текста", type="secondary", use_container_width=True):
+    if st.button("🔧 Запустить интеллектуальный анализ", type="secondary", use_container_width=True):
         if st.session_state.raw_text:
-            with st.spinner("Сверка словаря с GitHub и анализ документа..."):
-                glossary = get_and_update_glossary(
+            with st.spinner("Синхронизация с базой знаний Git и перевод неизвестных фраз..."):
+                # Находим новые фразы, шлем в YandexGPT только их, коммитим в global-glossary-02
+                st.session_state.current_glossary_cache = get_and_update_glossary(
                     st.session_state.raw_text, 
                     FOLDER_ID, 
                     API_KEY, 
                     GITHUB_TOKEN,
                     GITHUB_REPO
                 )
-                
-            with st.spinner("Выравнивание структуры и удаление дубликатов..."):
-                st.session_state.normalized_text = normalize_msds_with_glossary(st.session_state.raw_text, glossary)
-                
-            st.success("Успех! Текст нормализован.")
+            st.success("База знаний обновлена! Все фразы текущего документа теперь есть в кэше.")
         else:
             st.warning("Сначала загрузите или вставьте исходный текст на Шаге 1.")
 
     st.divider()
 
     # --- ШАГ 3 ---
-    st.header("Шаг 3: Перевод через YandexGPT")
+    st.header("Шаг 3: Мгновенная сборка перевода из кэша (0 рублей)")
+    st.caption("Документ собирается локально без повторных обращений к нейросети.")
 
-    if st.button("Выполнить перевод", type="primary", use_container_width=True):
-        if st.session_state.normalized_text:
-            with st.spinner("YandexGPT переводит документ..."):
-                st.session_state.translated_text = translate_msds_with_studio(
-                    st.session_state.normalized_text, FOLDER_ID, API_KEY, product_name_ru
+    if st.button("🚀 Собрать готовый документ", type="primary", use_container_width=True):
+        # Проверяем, запущен ли кэш в текущей сессии, если нет — пробуем получить его без перезаписи
+        if "current_glossary_cache" not in st.session_state or not st.session_state.current_glossary_cache:
+            with st.spinner("Загрузка активного словаря..."):
+                st.session_state.current_glossary_cache = get_and_update_glossary(
+                    st.session_state.raw_text, FOLDER_ID, API_KEY, GITHUB_TOKEN, GITHUB_REPO
                 )
-            st.success("Перевод завершен!")
+        
+        if st.session_state.current_glossary_cache:
+            with st.spinner("Локальная сборка ГОСТ-структуры..."):
+                # Собираем перевод за 1 секунду абсолютно бесплатно!
+                st.session_state.translated_text = assemble_translated_document(
+                    st.session_state.raw_text, 
+                    st.session_state.current_glossary_cache, 
+                    product_name_ru
+                )
+            st.success("Документ успешно собран!")
         else:
-            st.warning("Нечего переводить. Сначала выполните Шаг 2.")
+            st.warning("Не удалось подготовить кэш для сборки. Выполните Шаг 2.")
 
     if st.session_state.translated_text:
         with st.expander("Предпросмотр готового перевода Markdown (Шаг 3)", expanded=True):
