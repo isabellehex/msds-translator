@@ -22,7 +22,7 @@ GITHUB_TOKEN = github_secrets.get("token", "")
 GITHUB_REPO = github_secrets.get("repo", "")
 TARGET_BRANCH = github_secrets.get("branch", "global-glossary-02")
 
-# Инициализация сессий для стабильной работы редактора текста
+# Инициализация сессий
 if "raw_text" not in st.session_state:
     st.session_state.raw_text = ""
 if "original_raw_text" not in st.session_state:
@@ -56,20 +56,36 @@ def format_pdf_text_by_sections(text):
     lines = text.split("\n")
     formatted_lines = []
     
-    # Объединенное регулярное выражение:
-    # Группа 1 (Разделы): Начинается со слова SECTION или РАЗДЕЛ + номер
-    # Группа 2 (Подразделы): Начинается с цифр формата X.X или X.X.X (после которых идет буква или конец строки, чтобы не брать физические величины вроде 1.5 %)
-    pattern = re.compile(
-        r'^\s*(?:(SECTION|РАЗДЕЛ)\s+(\d+)\b|(?:(\d+\.\d+\.\d+)|\b(\d+\.\d+))\s*(?=[A-Za-zА-Яа-я]|$))', 
-        re.IGNORECASE
-    )
+    # 1. Регулярка для главных разделов
+    section_pattern = re.compile(r'^\s*(SECTION|РАЗДЕЛ)\s+(\d+)\b', re.IGNORECASE)
+    
+    # 2. Регулярка для подразделов (ищет X.X.X или X.X в начале строки)
+    # Позволяет после цифр иметь точку, тире, пробелы или сразу текст
+    subsection_pattern = re.compile(r'^\s*(\d+\.\d+\.\d+|\d+\.\d+)\b')
+    
+    # Черный список параметров, чтобы не путать подразделы с физическими величинами
+    # Если строка начинается с "1.5 %" или "1.2 mg", мы её не переносим
+    measurement_units = ["%", "mg", "g/", "ppm", "cst", "°", "linc", "v/v", "w/w", "min", "max", "hpa", "kpa"]
     
     for line in lines:
         cleaned_line = line.strip()
+        is_structure_element = False
         
-        # Если строка является разделом или подразделом 1.1 / 1.1.1
-        if pattern.match(cleaned_line):
-            # Если предыдущая строка в списке не пустая — принудительно делаем отступ в одну пустую строку
+        # Проверяем на главный раздел
+        if section_pattern.match(cleaned_line):
+            is_structure_element = True
+            
+        # Проверяем на подраздел 1.1 / 1.1.1
+        elif subsection_pattern.match(cleaned_line):
+            # Проверяем, не является ли это физической величиной из черного списка
+            # Переводим в нижний регистр для надежного поиска
+            lower_line = cleaned_line.lower()
+            if not any(unit in lower_line for unit in measurement_units):
+                is_structure_element = True
+        
+        # Если это элемент структуры (раздел или подраздел)
+        if is_structure_element:
+            # Если предыдущая строка не пустая — принудительно вставляем пустую строку перед элементом
             if formatted_lines and formatted_lines[-1] != "":
                 formatted_lines.append("")
             formatted_lines.append(line)
@@ -101,7 +117,7 @@ def parse_uploaded_file(uploaded_file):
                 
                 raw_extracted = "\n".join(full_text)
                 
-                # Применяем умную разметку структуры (Разделы + Подразделы)
+                # Применяем новую надежную разметку структуры
                 structured_text = format_pdf_text_by_sections(raw_extracted)
                 return structured_text
                 
@@ -123,7 +139,6 @@ def parse_uploaded_file(uploaded_file):
 # ИНТЕГРАЦИЯ GITHUB ДЛЯ ГЛОССАРИЯ
 # ==========================================
 def load_glossary_from_github():
-    """Загружает файл глоссария в формате JSON напрямую из репозитория GitHub."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return {}
     try:
@@ -139,7 +154,6 @@ def load_glossary_from_github():
         return {}
 
 def save_glossary_to_github(updated_glossary):
-    """Сортирует и перезаписывает глоссарий в репозитории на GitHub."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         st.error("Данные GitHub аутентификации не заполнены в secrets.")
         return False
@@ -160,7 +174,7 @@ def save_glossary_to_github(updated_glossary):
         st.session_state.current_glossary_cache = sorted_glossary
         return True
     except Exception as e:
-        st.error(f"Ошибка保存словаря на GitHub: {e}")
+        st.error(f"Ошибка сохранения словаря на GitHub: {e}")
         return False
 
 # ==========================================
@@ -173,14 +187,12 @@ with tab_main:
     st.title("📝 Переводчик MSDS — Версия v3")
     st.subheader("Фокус: Структурированный парсинг PDF ➡️ Интерактивное редактирование")
     
-    # --- ШАГ 1: Загрузка файла ---
     st.header("Шаг 1: Загрузка исходного MSDS")
     uploaded_file = st.file_uploader("Перетащите сюда исходный файл MSDS в формате PDF", type=["pdf", "txt"])
     
     if uploaded_file is not None:
         current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
         
-        # Запускаем парсинг только один раз при смене файла
         if st.session_state.loaded_file_id != current_file_id:
             with st.spinner("Извлекаем и структурируем текст из PDF по подразделам..."):
                 extracted = parse_uploaded_file(uploaded_file)
@@ -190,7 +202,6 @@ with tab_main:
                 st.session_state.file_name_output = os.path.splitext(uploaded_file.name)[0]
                 st.rerun()
 
-    # --- ШАГ 2: Примитивный интерактивный редактор ---
     st.header("Шаг 2: Редактор исходного текста (с разметкой структуры)")
     
     if st.session_state.raw_text:
@@ -216,7 +227,6 @@ with tab_main:
     else:
         st.info("Пожалуйста, загрузите PDF-файл на Шаге 1, чтобы увидеть разбитый по подразделам текст.")
         
-    # --- ШАГ 3: Заглушка для будущего идеального перевода нейросетью ---
     st.divider()
     st.header("Шаг 3: Генерация идеального перевода v3 (В разработке)")
     st.caption("На следующем этапе мы передадим этот структурированный текст в YandexGPT.")
