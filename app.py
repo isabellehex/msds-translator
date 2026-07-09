@@ -43,31 +43,44 @@ def reset_state():
     st.session_state.translated_text = ""
 
 # ==========================================
-# АЛГОРИТМ УМНОГО РАЗДЕЛЕНИЯ PDF ПО СТРУКТУРЕ
+# АЛГОРИТМ УМНОГО РАЗДЕЛЕНИЯ И ОБРЕЗКИ PDF
 # ==========================================
 def format_pdf_text_by_sections(text):
     """
-    Разбирает сплошной текст из PDF по строкам.
-    Находит разделы (SECTION/РАЗДЕЛ) и подразделы (1.1, 1.1.1) и отделяет их пустой строкой.
+    1. Находит SECTION 1 / РАЗДЕЛ 1 и отсекает весь текст до него.
+    2. Разбирает оставшийся текст из PDF по строкам.
+    3. Находит разделы (SECTION) и подразделы (1.1, 1.1.1) и отделяет их пустой строкой.
     """
     if not text:
         return ""
         
     lines = text.split("\n")
+    
+    # --- Шаг А: Поиск Первого Раздела для отсечения «шапки» ---
+    first_section_pattern = re.compile(r'^\s*(SECTION|РАЗДЕЛ)\s+1\b', re.IGNORECASE)
+    start_index = 0
+    
+    for idx, line in enumerate(lines):
+        if first_section_pattern.match(line.strip()):
+            start_index = idx
+            break
+            
+    # Отсекаем всё, что было до найденного индекса первой секции
+    meaningful_lines = lines[start_index:]
+    
+    # --- Шаг Б: Форматирование и расстановка пустых строк ---
     formatted_lines = []
     
-    # 1. Регулярка для главных разделов
+    # Регулярка для всех главных разделов (1-16)
     section_pattern = re.compile(r'^\s*(SECTION|РАЗДЕЛ)\s+(\d+)\b', re.IGNORECASE)
     
-    # 2. Регулярка для подразделов (ищет X.X.X или X.X в начале строки)
-    # Позволяет после цифр иметь точку, тире, пробелы или сразу текст
+    # Регулярка для подразделов (ищет X.X.X или X.X в начале строки)
     subsection_pattern = re.compile(r'^\s*(\d+\.\d+\.\d+|\d+\.\d+)\b')
     
     # Черный список параметров, чтобы не путать подразделы с физическими величинами
-    # Если строка начинается с "1.5 %" или "1.2 mg", мы её не переносим
     measurement_units = ["%", "mg", "g/", "ppm", "cst", "°", "linc", "v/v", "w/w", "min", "max", "hpa", "kpa"]
     
-    for line in lines:
+    for line in meaningful_lines:
         cleaned_line = line.strip()
         is_structure_element = False
         
@@ -77,8 +90,6 @@ def format_pdf_text_by_sections(text):
             
         # Проверяем на подраздел 1.1 / 1.1.1
         elif subsection_pattern.match(cleaned_line):
-            # Проверяем, не является ли это физической величиной из черного списка
-            # Переводим в нижний регистр для надежного поиска
             lower_line = cleaned_line.lower()
             if not any(unit in lower_line for unit in measurement_units):
                 is_structure_element = True
@@ -117,7 +128,7 @@ def parse_uploaded_file(uploaded_file):
                 
                 raw_extracted = "\n".join(full_text)
                 
-                # Применяем новую надежную разметку структуры
+                # Применяем новую разметку с отсечением шапки и разделением пустой строкой
                 structured_text = format_pdf_text_by_sections(raw_extracted)
                 return structured_text
                 
@@ -194,7 +205,7 @@ with tab_main:
         current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
         
         if st.session_state.loaded_file_id != current_file_id:
-            with st.spinner("Извлекаем и структурируем текст из PDF по подразделам..."):
+            with st.spinner("Извлекаем текст, отрезаем лишнее и структурируем по разделам..."):
                 extracted = parse_uploaded_file(uploaded_file)
                 st.session_state.raw_text = extracted
                 st.session_state.original_raw_text = extracted 
@@ -202,10 +213,10 @@ with tab_main:
                 st.session_state.file_name_output = os.path.splitext(uploaded_file.name)[0]
                 st.rerun()
 
-    st.header("Шаг 2: Редактор исходного текста (с разметкой структуры)")
+    st.header("Шаг 2: Редактор исходного текста (чистый контент с SECTION 1)")
     
     if st.session_state.raw_text:
-        st.caption("Автоматически выделены пустой строкой: заголовки SECTION, а также подразделы типа 1.1 и 1.1.1.")
+        st.caption("Всё, что шло до SECTION 1 / РАЗДЕЛ 1 автоматически отрезано. Элементы структуры разделены пустой строкой.")
         
         user_edited_text = st.text_area(
             label="Текст MSDS, готовый к проверке:",
@@ -225,7 +236,7 @@ with tab_main:
                 reset_state()
                 st.rerun()
     else:
-        st.info("Пожалуйста, загрузите PDF-файл на Шаге 1, чтобы увидеть разбитый по подразделам текст.")
+        st.info("Пожалуйста, загрузите PDF-файл на Шаге 1, чтобы увидеть чистый структурированный текст.")
         
     st.divider()
     st.header("Шаг 3: Генерация идеального перевода v3 (В разработке)")
