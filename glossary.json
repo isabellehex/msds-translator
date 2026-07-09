@@ -1,4 +1,4 @@
-{
+{ 
     "SECTION 8: Exposure controls/personal protection": "РАЗДЕЛ 8: Средства контроля воздействия/личная защита",
     "8.1.Control parameters": "8.1. Параметры контроля",
     "SECTION 15: Regulatory information": "РАЗДЕЛ 15: Нормативная информация",
@@ -77,7 +77,7 @@
     "Decomposition temperature": "Температура разложения",
     "Flammability (solid, gas)": "Воспламеняемость (твёрдое вещество, газ)",
     "Vapour pressure": "Давление пара",
-    "Relative vapour density at": "Относительная плотность пара при ",
+    "Relative vapour density at": "Относительная плотность пара при",
     "Relative density": "Относительная плотность",
     "Solubility": "Растворимость",
     "Log Pow": "Log Pow",
@@ -103,5 +103,20 @@
     "In accordance with ADR / RID / IMDG / IATA / ADN": "В соответствии с ADR / RID / IMDG / IATA / ADN",
     "Germany": "Германия",
     "Netherlands": "Нидерланды",
-    "This information is based on our current knowledge and is intended to describe the product for the purposes of health, safety and environmental requirements only. It should not therefore be construed as guaranteeing any specific property of the product": "Эта информация основана на наших текущих знаниях и предназначена только для описания продукта в целях соблюдения требований здравоохранения, безопасности и охраны окружающей среды. Поэтому её не следует рассматривать как гарантию каких-либо специфических свойств продукта."
+    "This information is based on our current knowledge and is intended to describe the product for the purposes of health, safety and environmental requirements only. It should not therefore be construed as guaranteeing any specific property of the product": "Эта информация основана на наших текущих знаниях и предназначена только для описания продукта в целях соблюдения требований здравоохранения, безопасности и охраны окружающей среды. Поэтому её не следует рассматривать как гарантию каких-либо специфических свойств продукта."",
+    "Corrosive to metals": "Коррозионное воздействие на металлы",
+    "Acute toxicity (oral)": "Острая токсичность (пероральная)",
+    "Acute toxicity (dermal)": "Острая токсичность (дермальная)",
+    "Specific target organ toxicity ": "Токсичность для специфических органов",
+    "Hazardous to the aquatic environment": "Опасность для водной среды",
+    "Full text of R-phrases": "Полный текст R-фраз",
+    "Symptoms/effects": "Симптомы/последствия",
+    "Symptoms/effects after inhalation": "Симптомы/последствия при вдыхании",
+    "Symptoms/effects after skin contact": "Симптомы/последствия при контакте с кожей",
+    "Symptoms/effects after eye contact": "Симптомы/последствия при контакте с глазами",
+    "Symptoms/effects after ingestion": "Симптомы/последствия при проглатывании",
+    "Do not use a heavy water stream": "не использовать сильную струю воды",
+    "Do not attempt to take action without suitable protective equipment": "не предпринимать никаких действий без подходящего защитного снаряжения",
+    "Collect spillage. On land, sweep or shovel into suitable containers. Soak up spills with inert solids, such as clay or diatomaceous earth as soon as possible.": "Собрать разлив. На суше смести или зачерпнуть лопатой в подходящие контейнеры. По возможности как можно скорее впитайте разливы инертными твёрдыми веществами, такими как глина или кизельгур.",
+    "Do not eat, drink or smoke when using this product. Wash hands and other exposed areas with mild soap and water before eating, drinking or smoking and when leaving work.": "не принимать пищу, не пить и не курить при работе с продуктом. Перед едой, питьём или курением, а также перед уходом с работы мыть руки и другие открытые участки кожи мягким мылом и водой." 
 }
