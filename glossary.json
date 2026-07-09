@@ -1,4 +1,4 @@
-{ 
+{
     "SECTION 8: Exposure controls/personal protection": "РАЗДЕЛ 8: Средства контроля воздействия/личная защита",
     "8.1.Control parameters": "8.1. Параметры контроля",
     "SECTION 15: Regulatory information": "РАЗДЕЛ 15: Нормативная информация",
@@ -118,5 +118,6 @@
     "Do not use a heavy water stream": "не использовать сильную струю воды",
     "Do not attempt to take action without suitable protective equipment": "не предпринимать никаких действий без подходящего защитного снаряжения",
     "Collect spillage. On land, sweep or shovel into suitable containers. Soak up spills with inert solids, such as clay or diatomaceous earth as soon as possible.": "Собрать разлив. На суше смести или зачерпнуть лопатой в подходящие контейнеры. По возможности как можно скорее впитайте разливы инертными твёрдыми веществами, такими как глина или кизельгур.",
-    "Do not eat, drink or smoke when using this product. Wash hands and other exposed areas with mild soap and water before eating, drinking or smoking and when leaving work.": "не принимать пищу, не пить и не курить при работе с продуктом. Перед едой, питьём или курением, а также перед уходом с работы мыть руки и другие открытые участки кожи мягким мылом и водой." 
+    "Do not eat, drink or smoke when using this product. Wash hands and other exposed areas with mild soap and water before eating, drinking or smoking and when leaving work.": "не принимать пищу, не пить и не курить при работе с продуктом. Перед едой, питьём или курением, а также перед уходом с работы мыть руки и другие открытые участки кожи мягким мылом и водой.",
+    "testtesttest": "тесттесттест"
 }
