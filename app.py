@@ -43,13 +43,12 @@ def reset_state():
     st.session_state.translated_text = ""
 
 # ==========================================
-# АЛГОРИТМ УМНОГО РАЗДЕЛЕНИЯ PDF ПО РАЗДЕЛАМ
+# АЛГОРИТМ УМНОГО РАЗДЕЛЕНИЯ PDF ПО СТРУКТУРЕ
 # ==========================================
 def format_pdf_text_by_sections(text):
     """
     Разбирает сплошной текст из PDF по строкам.
-    Находит заголовки разделов (SECTION/РАЗДЕЛ + номер) и добавляет перед ними пустую строку.
-    Удаляет множественные пустые строки, идущие подряд.
+    Находит разделы (SECTION/РАЗДЕЛ) и подразделы (1.1, 1.1.1) и отделяет их пустой строкой.
     """
     if not text:
         return ""
@@ -57,16 +56,20 @@ def format_pdf_text_by_sections(text):
     lines = text.split("\n")
     formatted_lines = []
     
-    # Регулярное выражение для поиска разделов: 
-    # Ищет слова SECTION или РАЗДЕЛ (в любом регистре), за которыми идут пробелы и цифры (1-16)
-    section_pattern = re.compile(r'^\s*(SECTION|РАЗДЕЛ)\s+(\d+)\b', re.IGNORECASE)
+    # Объединенное регулярное выражение:
+    # Группа 1 (Разделы): Начинается со слова SECTION или РАЗДЕЛ + номер
+    # Группа 2 (Подразделы): Начинается с цифр формата X.X или X.X.X (после которых идет буква или конец строки, чтобы не брать физические величины вроде 1.5 %)
+    pattern = re.compile(
+        r'^\s*(?:(SECTION|РАЗДЕЛ)\s+(\d+)\b|(?:(\d+\.\d+\.\d+)|\b(\d+\.\d+))\s*(?=[A-Za-zА-Яа-я]|$))', 
+        re.IGNORECASE
+    )
     
     for line in lines:
         cleaned_line = line.strip()
         
-        # Если строка совпадает с началом раздела
-        if section_pattern.match(cleaned_line):
-            # Если предыдущая строка не была уже пустой, принудительно вставляем пустую строку для разделения
+        # Если строка является разделом или подразделом 1.1 / 1.1.1
+        if pattern.match(cleaned_line):
+            # Если предыдущая строка в списке не пустая — принудительно делаем отступ в одну пустую строку
             if formatted_lines and formatted_lines[-1] != "":
                 formatted_lines.append("")
             formatted_lines.append(line)
@@ -76,7 +79,7 @@ def format_pdf_text_by_sections(text):
     # Собираем обратно в текст
     result_text = "\n".join(formatted_lines)
     
-    # Схлопываем случайные тройные/четверные переносы строк до аккуратных двух (одна пустая строка)
+    # Схлопываем случайные тройные и более переносы строк до одной пустой строки (\n\n)
     result_text = re.sub(r'\n{3,}', '\n\n', result_text)
     
     return result_text.strip()
@@ -96,10 +99,9 @@ def parse_uploaded_file(uploaded_file):
                     if text:
                         full_text.append(text)
                 
-                # Извлекаем сырой текст
                 raw_extracted = "\n".join(full_text)
                 
-                # Применяем алгоритм расстановки пустых строк перед SECTION
+                # Применяем умную разметку структуры (Разделы + Подразделы)
                 structured_text = format_pdf_text_by_sections(raw_extracted)
                 return structured_text
                 
@@ -158,7 +160,7 @@ def save_glossary_to_github(updated_glossary):
         st.session_state.current_glossary_cache = sorted_glossary
         return True
     except Exception as e:
-        st.error(f"Ошибка сохранения словаря на GitHub: {e}")
+        st.error(f"Ошибка保存словаря на GitHub: {e}")
         return False
 
 # ==========================================
@@ -180,7 +182,7 @@ with tab_main:
         
         # Запускаем парсинг только один раз при смене файла
         if st.session_state.loaded_file_id != current_file_id:
-            with st.spinner("Извлекаем и структурируем текст из PDF по разделам..."):
+            with st.spinner("Извлекаем и структурируем текст из PDF по подразделам..."):
                 extracted = parse_uploaded_file(uploaded_file)
                 st.session_state.raw_text = extracted
                 st.session_state.original_raw_text = extracted 
@@ -189,21 +191,19 @@ with tab_main:
                 st.rerun()
 
     # --- ШАГ 2: Примитивный интерактивный редактор ---
-    st.header("Шаг 2: Редактор исходного текста (с разбивкой по разделам)")
+    st.header("Шаг 2: Редактор исходного текста (с разметкой структуры)")
     
     if st.session_state.raw_text:
-        st.caption("Обратите внимание: перед каждым заголовком SECTION автоматически добавлена пустая строка. Вы можете править текст прямо здесь:")
+        st.caption("Автоматически выделены пустой строкой: заголовки SECTION, а также подразделы типа 1.1 и 1.1.1.")
         
-        # Текстовое поле отображает текущее состояние из сессии и обновляет его при вводе
         user_edited_text = st.text_area(
-            label="Текст MSDS, готовый к переводу:",
+            label="Текст MSDS, готовый к проверке:",
             value=st.session_state.raw_text,
             height=550,
             key="msds_main_editor"
         )
         st.session_state.raw_text = user_edited_text
         
-        # Кнопки управления состоянием текста
         col_btn1, col_btn2, _ = st.columns([1, 1, 4])
         with col_btn1:
             if st.button("Сбросить изменения к оригиналу"):
@@ -214,12 +214,12 @@ with tab_main:
                 reset_state()
                 st.rerun()
     else:
-        st.info("Пожалуйста, загрузите PDF-файл на Шаге 1, чтобы открыть редактор текста с автоматической разметкой разделов.")
+        st.info("Пожалуйста, загрузите PDF-файл на Шаге 1, чтобы увидеть разбитый по подразделам текст.")
         
     # --- ШАГ 3: Заглушка для будущего идеального перевода нейросетью ---
     st.divider()
     st.header("Шаг 3: Генерация идеального перевода v3 (В разработке)")
-    st.caption("На следующем этапе мы передадим этот текст в YandexGPT, чтобы он перевёл разделы, сохраняя красивые отступы.")
+    st.caption("На следующем этапе мы передадим этот структурированный текст в YandexGPT.")
     st.button("Запустить нейросетевой перевод v3", disabled=True)
 
 # --- ВКЛАДКА 2: РЕДАКТОР ГЛОССАРИЯ ---
