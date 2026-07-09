@@ -143,14 +143,10 @@ def extract_translation_candidates(text: str) -> set:
                 candidates.add(parsed["text"])
                 
         elif parsed["type"] == "subsection":
-            t_key = translate_chunk(parsed["key"])
-            num_part = parsed["num"]
-            
-            if parsed["val"]:
-                t_val = translate_chunk(parsed["val"])
-                cleaned_lines.append(f"\n## {num_part} {t_key}: {t_val}")
-            else:
-                cleaned_lines.append(f"\n## {num_part} {t_key}")
+            if parsed["key"] and not is_technical_garbage(parsed["key"]):
+                candidates.add(parsed["key"])
+            if parsed["val"] and not is_technical_garbage(parsed["val"]):
+                candidates.add(parsed["val"])
                 
         elif parsed["type"] == "key_value":
             if parsed["key"] and not is_technical_garbage(parsed["key"]):
