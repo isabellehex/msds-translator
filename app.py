@@ -412,7 +412,8 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
         p.paragraph_format.line_spacing = 1.15
         
         if cleaned_line.startswith('# '):
-            text_content = cleaned_line.replace('# ', '').strip()
+            # 1. Удаляем маркер заголовка И полностью вырезаем любые звёздочки
+            text_content = cleaned_line.replace('# ', '').replace('**', '').strip()
             run = p.add_run(text_content)
             run.bold = True
             run.font.name = 'Arial'
@@ -420,18 +421,23 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
             run.font.color.rgb = DARK_BLUE
             p.paragraph_format.space_before = Pt(12)
             p.paragraph_format.space_after = Pt(6)
+            
         elif cleaned_line.startswith('## '):
-            text_content = cleaned_line.replace('## ', '').strip()
+            # 2. Удаляем маркер подраздела И полностью вырезаем любые звёздочки
+            text_content = cleaned_line.replace('## ', '').replace('**', '').strip()
             run = p.add_run(text_content)
+            run.bold = True  
             run.font.name = 'Arial'
             run.font.size = Pt(11)
             run.font.color.rgb = DARK_BLUE
             p.paragraph_format.space_before = Pt(6)
+            
         else:
             if cleaned_line.startswith('- '):
                 cleaned_line = cleaned_line.replace('- ', '', 1)
                 p.paragraph_format.left_indent = Inches(0.25)
             
+            # 3. Для обычного текста делим по звёздочкам, чтобы сделать нужные слова жирными
             parts = re.split(r'(\*\*.*?\*\*)', cleaned_line)
             for part in parts:
                 if part.startswith('**') and part.endswith('**'):
@@ -439,7 +445,9 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
                     run = p.add_run(bold_text)
                     run.bold = True
                 else:
-                    run = p.add_run(part)
+                    # Если звёздочка осталась «одинокой» или сломалась — вырезаем её из текста
+                    clean_part = part.replace('**', '')
+                    run = p.add_run(clean_part)
                 run.font.name = 'Arial'
                 run.font.size = Pt(9)
                 
