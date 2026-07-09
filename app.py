@@ -472,7 +472,7 @@ def render_glossary_tab():
         glossary_data = json.loads(contents.decoded_content.decode("utf-8"))
         
         data_list = [{"Оригинал (English)": k, "Перевод (Russian)": v} for k, v in glossary_data.items()]
-        
+        data_list.sort(key=lambda x: x["Оригинал (English)"].lower())
         edited_df = st.data_editor(data_list, use_container_width=True, num_rows="dynamic")
         
         if st.button("💾 Сохранить изменения в словаре", type="primary"):
