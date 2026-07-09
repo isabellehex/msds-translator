@@ -3,6 +3,7 @@ import openai
 import pdfplumber
 import io
 import re
+import os
 import zipfile
 import json
 import xml.etree.ElementTree as ET
@@ -18,7 +19,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Автоматическое чтение конфигураций из Streamlit Secrets ---
+# --- Автоматическое чтение конфигураций из Streamlit Secrets (по секциям) ---
 yandex_secrets = st.secrets.get("yandex", {})
 FOLDER_ID = yandex_secrets.get("folder_id", "")
 API_KEY = yandex_secrets.get("api_key", "")
@@ -26,6 +27,7 @@ API_KEY = yandex_secrets.get("api_key", "")
 github_secrets = st.secrets.get("github", {})
 GITHUB_TOKEN = github_secrets.get("token", "")
 GITHUB_REPO = github_secrets.get("repo", "")
+TARGET_BRANCH = github_secrets.get("branch", "main")
 
 
 def clean_inline_duplicate(text: str) -> str:
@@ -62,7 +64,6 @@ def extract_raw_xml_text_from_zip(file_bytes) -> str:
                         p_text = clean_inline_duplicate(p_text)
                         
                         if p_text:
-                            # Избегаем дублирования идущих подряд одинаковых строк
                             if not all_extracted_lines or all_extracted_lines[-1] != f"{prefix}{p_text}":
                                 all_extracted_lines.append(f"{prefix}{p_text}")
     except Exception as e:
@@ -71,59 +72,98 @@ def extract_raw_xml_text_from_zip(file_bytes) -> str:
 
     return "\n".join(all_extracted_lines)
 
+def parse_line(line_str: str) -> dict:
+    """
+    Единый интеллектуальный парсер строки. 
+    Гарантирует 100% совпадение структуры на этапах экстракции и сборки.
+    """
+    line_str = line_str.strip()
+    if not line_str:
+        return {"type": "empty"}
+        
+    # 1. Главные разделы (SECTION 1, РАЗДЕЛ 2)
+    if bool(re.match(r'(?im)^[ \t]*(?:section|раздел)\s*\d+', line_str)):
+        return {"type": "section", "text": line_str}
+        
+    # 2. Цифровые подразделы любого уровня (1.1, 2.3.1, 15.2.4 и т.д.)
+    sub_match = re.match(r'^(\d+\.\d+(?:\.\d+)*\.?)\s*(.*)$', line_str)
+    if sub_match:
+        num = sub_match.group(1)
+        rest = sub_match.group(2).strip()
+        if ':' in rest:
+            key, val = rest.split(':', 1)
+            return {"type": "subsection", "num": num, "key": key.strip(), "val": val.strip()}
+        else:
+            return {"type": "subsection", "num": num, "key": rest, "val": None}
+
+    # 3. Обнаружение табличной структуры (разделение табами или 3+ пробелами)
+    chunks = [c.strip() for c in re.split(r'\t|\s{3,}', line_str) if c.strip()]
+    if len(chunks) > 2:
+        return {"type": "table_row", "chunks": chunks}
+    if len(chunks) == 2 and ':' not in line_str:
+        return {"type": "table_row", "chunks": chunks}
+        
+    # 4. Стандартные параметры формата "Ключ: Значение"
+    if ':' in line_str:
+        key, val = line_str.split(':', 1)
+        key_str = key.strip()
+        val_str = val.strip()
+        # Проверяем, что это не ссылка и длина ключа адекватна
+        if key_str and len(key_str) < 100 and not key_str.lower().startswith(('http', 'www')):
+            return {"type": "key_value", "key": key_str, "val": val_str}
+            
+    # 5. Обычный текст или маркированный список
+    is_bullet = line_str.startswith(('•', '-', '*'))
+    clean_text = line_str.lstrip('•-* ').strip()
+    return {"type": "text", "text": clean_text, "is_bullet": is_bullet}
+
+def is_technical_garbage(s: str) -> bool:
+    """Определяет, состоит ли строка только из цифр, кодов, CAS или спецсимволов."""
+    s_clean = s.strip()
+    if not s_clean:
+        return True
+    if re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]\>\<\|\=]+$', s_clean):
+        return True
+    return False
+
 def extract_translation_candidates(text: str) -> set:
-    """
-    Разбивает весь документ на уникальные логические сегменты (фразы, параметры, значения).
-    Исключает из перевода чистые цифры, CAS-номера и технический мусор для экономии денег.
-    """
+    """Извлекает чистые текстовые кандидаты на перевод на основе единого парсера."""
     candidates = set()
     stop_words = ['www.', 'http', 'safety data sheet', 'material safety data sheet']
     
     for line in text.split('\n'):
         line_str = line.strip()
-        if not line_str:
-            continue
-        if any(sw in line_str.lower() for sw in stop_words):
-            continue
-        # Пропускаем, если строка состоит только из цифр, точек, тире и спецсимволов (CAS, коды, даты)
-        if re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', line_str):
+        if not line_str or any(sw in line_str.lower() for sw in stop_words):
             continue
             
-        # Проверяем структуру "Ключ: Значение" (например, "Physical state: Solid")
-        if ':' in line_str:
-            parts = line_str.split(':', 1)
-            key = parts[0].strip()
-            val = parts[1].strip()
-            
-            # Если ключ короткий (похож на название параметра), кэшируем его отдельно
-            if len(key) < 60 and not re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', key):
-                candidates.add(key)
-            else:
-                candidates.add(line_str)
-                continue
+        parsed = parse_line(line_str)
+        
+        if parsed["type"] == "section":
+            if not is_technical_garbage(parsed["text"]):
+                candidates.add(parsed["text"])
                 
-            if val and not re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', val):
-                # Дробим внутри на случай слитных параметров в строке (как на скриншотах)
-                sub_parts = re.split(r'(?<=\.)\s+(?=[А-Яа-яA-Za-z][^:]+:\s)', val)
-                if len(sub_parts) > 1:
-                    for sp in sub_parts:
-                        sp_str = sp.strip()
-                        if ':' in sp_str:
-                            skey, sval = sp_str.split(':', 1)
-                            skey, sval = skey.strip(), sval.strip()
-                            if len(skey) < 60 and not re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', skey):
-                                candidates.add(skey)
-                            if sval and not re.match(r'^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', sval):
-                                candidates.add(sval)
-                        else:
-                            candidates.add(sp_str)
-                else:
-                    candidates.add(val)
-        else:
-            candidates.add(line_str)
-            
+        elif parsed["type"] == "subsection":
+            if parsed["key"] and not is_technical_garbage(parsed["key"]):
+                candidates.add(parsed["key"])
+            if parsed["val"] and not is_technical_garbage(parsed["val"]):
+                candidates.add(parsed["val"])
+                
+        elif parsed["type"] == "key_value":
+            if parsed["key"] and not is_technical_garbage(parsed["key"]):
+                candidates.add(parsed["key"])
+            if parsed["val"] and not is_technical_garbage(parsed["val"]):
+                candidates.add(parsed["val"])
+                
+        elif parsed["type"] == "table_row":
+            for chunk in parsed["chunks"]:
+                if not is_technical_garbage(chunk):
+                    candidates.add(chunk)
+                    
+        elif parsed["type"] == "text":
+            if not is_technical_garbage(parsed["text"]):
+                candidates.add(parsed["text"])
+                
     return candidates
-
 
 def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_token: str, github_repo: str) -> dict:
     """Загружает глоссарий из Git, находит новые фразы, переводит только их пачками и пушит в Git."""
@@ -134,9 +174,6 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
     g = Github(github_token)
     repo = g.get_repo(github_repo)
     file_path = "glossary.json"
-    
-    github_secrets = st.secrets.get("github", {})
-    TARGET_BRANCH = github_secrets.get("branch", "main")
     
     contents = None
     current_glossary = {}
@@ -219,36 +256,40 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
 
     return current_glossary
 
-
 def assemble_translated_document(text: str, glossary: dict, product_name_ru: str) -> str:
     """
-    Финальная сборка документа (0 рублей). Локально идет по исходному тексту, 
-    выдергивает переводы из кэша и наводит красивую верстку (жирный текст, заголовки, списки).
+    Финальная высокоточная сборка документа. 
+    Берет переводы из кэша, гарантирует совпадение ключей и наводит идеальную ГОСТ-верстку.
     """
     cleaned_lines = []
     seen_sections = set()
-    stop_patterns = [r'www\.', r'safety data sheet', r'material safety data sheet']
+    stop_words = ['www.', 'http', 'safety data sheet', 'material safety data sheet']
     
     def translate_chunk(chunk: str) -> str:
-        c_clean = chunk.strip()
-        if not c_clean:
+        if not chunk:
             return ""
-        if re.match(r'^^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', c_clean):
+        c_clean = chunk.strip()
+        if is_technical_garbage(c_clean):
             return c_clean
-        # Берем перевод из кэша. Если вдруг перевода нет — возвращаем оригинал
         return glossary.get(c_clean, c_clean)
 
     for line in text.split('\n'):
         line_str = line.strip()
-        if not line_str or any(re.search(pat, line_str, re.IGNORECASE) for pat in stop_patterns):
+        if not line_str or any(sw in line_str.lower() for sw in stop_words):
             continue
             
-        # 1. Форматирование главных разделов
-        if bool(re.match(r'(?im)^[ \t]*(?:section|раздел)\s*\d+', line_str)):
-            translated_title = translate_chunk(line_str)
+        # Защита от мусорных строк, состоящих только из двоеточий или знаков препинания
+        if line_str == ":" or re.match(r'^[:\s\-,\|\.]+$', line_str):
+            continue
+
+        parsed = parse_line(line_str)
+        
+        # 1. Сборка главных разделов
+        if parsed["type"] == "section":
+            translated_title = translate_chunk(parsed["text"])
             cleaned_title = translated_title.replace('#', '').strip()
             
-            if not cleaned_title.lower().startswith('раздел'):
+            if not cleaned_title.lower().startswith(('раздел', 'section')):
                 num_match = re.search(r'\d+', line_str)
                 if num_match:
                     cleaned_title = f"РАЗДЕЛ {num_match.group(0)}: {cleaned_title.split(':', 1)[-1].strip()}"
@@ -258,52 +299,43 @@ def assemble_translated_document(text: str, glossary: dict, product_name_ru: str
                 continue
             seen_sections.add(section_marker)
             
-            cleaned_lines.append(f"\n# {cleaned_title}")
-            continue
+            cleaned_lines.append(f"\n# {cleaned_title.upper()}")
             
-        # 2. Форматирование подразделов (1.1, 4.2.1)
-        if re.match(r'^(\d+\.\d+\.?\d*)\s+', line_str):
-            match = re.match(r'^(\d+\.\d+\.?\d*)\s+(.*)$', line_str)
-            num_part = match.group(1)
-            text_part = match.group(2)
-            cleaned_lines.append(f"\n## {num_part} {translate_chunk(text_part)}")
-            continue
+        # 2. Сборка подразделов (1.1, 2.3.1, 4.2.2 и т.д.)
+        elif parsed["type"] == "subsection":
+            t_key = translate_chunk(parsed["key"])
+            num_part = parsed["num"]
             
-        # 3. Структурирование параметров "Ключ: Значение"
-        if ':' in line_str:
-            parts = line_str.split(':', 1)
-            key, val = parts[0].strip(), parts[1].strip()
-            
-            if len(key) < 60 and not re.match(r'^^[\d\s\.,\-\/\\#№:;%()\*\+\[\]]+$', key):
-                t_key = translate_chunk(key)
-                
-                # Проверяем внутренности значения на перечисление параметров на одной строке
-                sub_parts = re.split(r'(?<=\.)\s+(?=[А-Яа-яA-Za-z][^:]+:\s)', val)
-                if len(sub_parts) > 1:
-                    assembled_sub = []
-                    for sp in sub_parts:
-                        sp_str = sp.strip()
-                        if ':' in sp_str:
-                            skey, sval = sp_str.split(':', 1)
-                            assembled_sub.append(f"**{translate_chunk(skey)}:** {translate_chunk(sval)}")
-                        else:
-                            assembled_sub.append(translate_chunk(sp_str))
-                    t_val = ".\n" + ".\n".join(assembled_sub)
-                else:
-                    t_val = translate_chunk(val)
-                    
-                cleaned_lines.append(f"**{t_key}:** {t_val}")
+            if parsed["val"]:
+                t_val = translate_chunk(parsed["val"])
+                cleaned_lines.append(f"\n## {num_part} **{t_key}**: {t_val}")
             else:
-                cleaned_lines.append(translate_chunk(line_str))
-        else:
-            # 4. Обычные строки или маркированные списки
-            prefix = "- " if line_str.startswith('•') or line_str.startswith('-') else ""
-            pure_text = line_str.lstrip('•- ').strip()
-            cleaned_lines.append(f"{prefix}{translate_chunk(pure_text)}")
+                cleaned_lines.append(f"\n## {num_part} **{t_key}**")
+                
+        # 3. Сборка параметров "Ключ: Значение"
+        elif parsed["type"] == "key_value":
+            t_key = translate_chunk(parsed["key"])
+            t_val = translate_chunk(parsed["val"])
+            if t_key and t_val:
+                cleaned_lines.append(f"**{t_key}:** {t_val}")
+            elif t_key:
+                cleaned_lines.append(f"**{t_key}:**")
+                
+        # 4. Сборка табличных строк в структурированную сетку
+        elif parsed["type"] == "table_row":
+            t_chunks = [translate_chunk(c) for c in parsed["chunks"]]
+            row_str = " | ".join(t_chunks)
+            cleaned_lines.append(f"| {row_str} |")
+            
+        # 5. Сборка обычного текста и списков
+        elif parsed["type"] == "text":
+            t_text = translate_chunk(parsed["text"])
+            prefix = "- " if parsed["is_bullet"] else ""
+            cleaned_lines.append(f"{prefix}{t_text}")
             
     final_markdown = '\n'.join(cleaned_lines)
     # Финальный штрих: глобально заменяем имя продукта на его официальное русское имя по ТЗ
-    return re.sub(r'\n\s*\n+', '\n\n', final_markdown).strip()
+    return re.sub(r'ТРИМЕТИЛОЛ\s*ПРОПАН|TRIMETHYLOL\s*PROPANE', product_name_ru, final_markdown, flags=re.IGNORECASE).strip()
 
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -417,6 +449,7 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
     return bio
 
 def render_glossary_tab():
+    """Вкладка с интерактивной таблицей для управления глоссарием на GitHub"""
     st.header("Управление глоссарием")
     st.caption("Здесь вы можете просматривать, изменять и удалять записи словаря. Изменения автоматически улетят на GitHub.")
     
@@ -424,15 +457,9 @@ def render_glossary_tab():
         st.error("GitHub конфигурации не найдены в Streamlit Secrets!")
         return
 
-    # Динамически получаем имя ветки из secrets для этой вкладки
-    github_secrets = st.secrets.get("github", {})
-    TARGET_BRANCH = github_secrets.get("branch", "main")
-
     try:
         g = Github(GITHUB_TOKEN)
         repo = g.get_repo(GITHUB_REPO)
-        
-        # Используем TARGET_BRANCH вместо жесткой строки
         contents = repo.get_contents("glossary.json", ref=TARGET_BRANCH)
         glossary_data = json.loads(contents.decoded_content.decode("utf-8"))
         
@@ -444,7 +471,6 @@ def render_glossary_tab():
             updated_dict = {row["Оригинал (English)"]: row["Перевод (Russian)"] for row in edited_df if row["Оригинал (English)"]}
             new_content = json.dumps(updated_dict, ensure_ascii=False, indent=4)
             
-            # Используем TARGET_BRANCH для сохранения
             repo.update_file(
                 contents.path, 
                 "Ручное редактирование глоссария через интерфейс", 
@@ -452,7 +478,7 @@ def render_glossary_tab():
                 contents.sha,
                 branch=TARGET_BRANCH
             )
-            st.success(f"Словарь успешно обновлен в ветке {TARGET_BRANCH} на GitHub!")
+            st.success(f"Словарь успешно обновлен в ветке {TARGET_BRANCH} на GitHub! Изменения применятся к следующим переводам.")
             
     except Exception as e:
         st.error(f"Не удалось загрузить данные с GitHub. Ошибка: {e}")
@@ -460,17 +486,17 @@ def render_glossary_tab():
 # --- Инициализация состояния ---
 if "raw_text" not in st.session_state:
     st.session_state.raw_text = ""
-if "normalized_text" not in st.session_state:
-    st.session_state.normalized_text = ""
 if "translated_text" not in st.session_state:
     st.session_state.translated_text = ""
+if "current_glossary_cache" not in st.session_state:
+    st.session_state.current_glossary_cache = {}
 if "file_name_output" not in st.session_state:
     st.session_state.file_name_output = "MSDS_RU_Translated"
 
 def reset_state():
     st.session_state.raw_text = ""
-    st.session_state.normalized_text = ""
     st.session_state.translated_text = ""
+    st.session_state.current_glossary_cache = {}
 
 # --- Основной Интерфейс ---
 st.title("🧪 MSDS Translator — Premium AI Studio")
@@ -486,7 +512,7 @@ with tab_main:
     # --- ШАГ 1 ---
     st.header("Шаг 1: Загрузка исходного MSDS (EN)")
     input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / PDF / TXT)", "Вставить текст вручную"), on_change=reset_state)
-    
+
     if input_method == "Вставить текст вручную":
         inserted_text = st.text_area("Вставьте текст MSDS на английском языке:", height=250, placeholder="SECTION 1: Identification...")
         if inserted_text:
@@ -505,21 +531,21 @@ with tab_main:
             elif uploaded_file.name.endswith(".pdf"):
                 with pdfplumber.open(io.BytesIO(uploaded_file.read())) as pdf:
                     st.session_state.raw_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-    
+
     if st.session_state.raw_text:
         with st.expander("Просмотр извлеченного оригинального текста (Шаг 1)", expanded=False):
             st.text_area("Оригинал без изменений:", value=st.session_state.raw_text, height=200, disabled=True, key="raw_preview")
-    
+
     st.divider()
 
-# --- ШАГ 2 ---
-    st.header("Шаг 2: Анализ документа и обновление базы знаний")
-    st.caption("Система извлечет уникальные фразы, найдет новые параметры и автоматически обучит словарь на GitHub.")
+    # --- ШАГ 2 ---
+    st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
+    st.caption("Автоматически сверяется с глоссарием на GitHub, добавляет новые заголовки и выравнивает текст.")
 
     if st.button("🔧 Запустить интеллектуальный анализ", type="secondary", use_container_width=True):
         if st.session_state.raw_text:
             with st.spinner("Синхронизация с базой знаний Git и перевод неизвестных фраз..."):
-                # Находим новые фразы, шлем в YandexGPT только их, коммитим в global-glossary-02
+                # Находим новые фразы, шлем в YandexGPT только их, коммитим в указанную ветку
                 st.session_state.current_glossary_cache = get_and_update_glossary(
                     st.session_state.raw_text, 
                     FOLDER_ID, 
@@ -538,8 +564,8 @@ with tab_main:
     st.caption("Документ собирается локально без повторных обращений к нейросети.")
 
     if st.button("🚀 Собрать готовый документ", type="primary", use_container_width=True):
-        # Проверяем, запущен ли кэш в текущей сессии, если нет — пробуем получить его без перезаписи
-        if "current_glossary_cache" not in st.session_state or not st.session_state.current_glossary_cache:
+        # Проверяем, запущен ли кэш в текущей сессии
+        if not st.session_state.current_glossary_cache:
             with st.spinner("Загрузка активного словаря..."):
                 st.session_state.current_glossary_cache = get_and_update_glossary(
                     st.session_state.raw_text, FOLDER_ID, API_KEY, GITHUB_TOKEN, GITHUB_REPO
