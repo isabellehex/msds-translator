@@ -24,7 +24,7 @@ api_key = yandex_secrets.get("api_key", "")
 github_secrets = st.secrets.get("github", {})
 GITHUB_TOKEN = github_secrets.get("token", "")
 GITHUB_REPO = github_secrets.get("repo", "")
-TARGET_BRANCH = github_secrets.get("branch", "global-glossary-02")
+TARGET_BRANCH = github_secrets.get("branch", "global-glossary-03")
 
 # Инициализация сессий для стабильной работы редактора текста
 if "raw_text" not in st.session_state:
