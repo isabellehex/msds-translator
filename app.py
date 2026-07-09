@@ -72,26 +72,36 @@ def extract_raw_xml_text_from_zip(file_bytes) -> str:
     return "\n".join(all_extracted_lines)
 
 def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_token: str, github_repo: str) -> dict:
-    """Умное обновление словаря: сверка с GitHub и перевод только новых заголовков."""
+    """Умное обновление словаря: бережное чтение с GitHub и перевод только новых заголовков."""
     raw_sections = set(re.findall(r'(?im)^[ \t]*(?:section|раздел)\s*\d+.*$', raw_text))
     if not raw_sections:
         return {}
 
     if not github_token or not github_repo:
-        st.error("GitHub токен или репозиторий не настроены в Secrets!")
+        st.error("GitHub конфигурация не найдена в Secrets!")
         return {}
 
     g = Github(github_token)
     repo = g.get_repo(github_repo)
     file_path = "glossary.json"
     
+    # Читаем ветку из secrets. Если забыли прописать, по умолчанию возьмется "main"
+    github_secrets = st.secrets.get("github", {})
+    TARGET_BRANCH = github_secrets.get("branch", "main")
+    
+    contents = None
+    current_glossary = {}
+    
     try:
-        contents = repo.get_contents(file_path)
+        # Указываем branch, динамически взятый из secrets
+        contents = repo.get_contents(file_path, ref=TARGET_BRANCH)
         current_glossary = json.loads(contents.decoded_content.decode("utf-8"))
+    except json.JSONDecodeError as jde:
+        st.error(f"Синтаксическая ошибка в glossary.json на GitHub! Проверьте лишние кавычки или запятые. Ошибка: {jde}")
+        st.stop()
     except Exception as e:
-        st.warning(f"Не удалось загрузить словарь с GitHub. Создаем новый. Ошибка: {e}")
+        st.warning(f"Не удалось получить файл глоссария из ветки {TARGET_BRANCH}. Будет создан новый файл. Ошибка: {e}")
         current_glossary = {}
-        contents = None
 
     new_sections = [sec for sec in raw_sections if sec not in current_glossary]
     
@@ -108,7 +118,7 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
     )
     
     prompt = (
-        "Ты — AI-модуль normalisation технической документации. Тебе дан список новых заголовков разделов из MSDS.\n"
+        "Ты — AI-модуль нормализации технической документации. Тебе дан список новых заголовков разделов из MSDS.\n"
         "Переведи их на русский язык (ГОСТ 30333-2022).\n\n"
         "ОБЯЗАТЕЛЬНОЕ ТРЕБОВАНИЕ: Верни ответ СТРОГО в формате валидного JSON-объекта, "
         "где КЛЮЧ — это оригинальная строка из списка (без изменений), а ЗНАЧЕНИЕ — её эталонный перевод.\n"
@@ -124,7 +134,6 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
         )
         answer = response.output[0].content[0].text.strip()
         
-        # Безопасное регулярное выражение с шестнадцатеричными кодами обратных кавычек
         answer = re.sub(r'\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60', '', answer)
         new_translations = json.loads(answer)
         
@@ -132,17 +141,17 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
         updated_content = json.dumps(current_glossary, ensure_ascii=False, indent=4)
         commit_message = f"Авто-обновление глоссария: добавлено {len(new_translations)} терминов"
         
-        if contents:
-            repo.update_file(contents.path, commit_message, updated_content, contents.sha)
+        if contents is not None:
+            repo.update_file(contents.path, commit_message, updated_content, contents.sha, branch=TARGET_BRANCH)
         else:
-            repo.create_file(file_path, commit_message, updated_content)
+            repo.create_file(file_path, commit_message, updated_content, branch=TARGET_BRANCH)
             
-        st.success("Глоссарий успешно обновлен на GitHub!")
+        st.success(f"Глоссарий успешно обновлен в ветке {TARGET_BRANCH} на GitHub!")
         
     except json.JSONDecodeError:
-        st.error("YandexGPT вернул невалидный JSON. Обновление словаря отменено.")
+        st.error("YandexGPT вернул невалидный JSON для новых терминов. Обновление словаря отменено.")
     except Exception as e:
-        st.error(f"Ошибка при обновлении глоссария: {e}")
+        st.error(f"Ошибка при сохранении обновлений глоссария на GitHub: {e}")
 
     return current_glossary
 
@@ -424,7 +433,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
     return bio
 
 def render_glossary_tab():
-    """Вкладка с интерактивной таблицей для управления глоссарием на GitHub"""
     st.header("Управление глоссарием")
     st.caption("Здесь вы можете просматривать, изменять и удалять записи словаря. Изменения автоматически улетят на GitHub.")
     
@@ -432,10 +440,16 @@ def render_glossary_tab():
         st.error("GitHub конфигурации не найдены в Streamlit Secrets!")
         return
 
+    # Динамически получаем имя ветки из secrets для этой вкладки
+    github_secrets = st.secrets.get("github", {})
+    TARGET_BRANCH = github_secrets.get("branch", "main")
+
     try:
         g = Github(GITHUB_TOKEN)
         repo = g.get_repo(GITHUB_REPO)
-        contents = repo.get_contents("glossary.json")
+        
+        # Используем TARGET_BRANCH вместо жесткой строки
+        contents = repo.get_contents("glossary.json", ref=TARGET_BRANCH)
         glossary_data = json.loads(contents.decoded_content.decode("utf-8"))
         
         data_list = [{"Оригинал (English)": k, "Перевод (Russian)": v} for k, v in glossary_data.items()]
@@ -446,13 +460,15 @@ def render_glossary_tab():
             updated_dict = {row["Оригинал (English)"]: row["Перевод (Russian)"] for row in edited_df if row["Оригинал (English)"]}
             new_content = json.dumps(updated_dict, ensure_ascii=False, indent=4)
             
+            # Используем TARGET_BRANCH для сохранения
             repo.update_file(
                 contents.path, 
                 "Ручное редактирование глоссария через интерфейс", 
                 new_content, 
-                contents.sha
+                contents.sha,
+                branch=TARGET_BRANCH
             )
-            st.success("Словарь успешно обновлен на GitHub! Изменения применятся к следующим переводам.")
+            st.success(f"Словарь успешно обновлен в ветке {TARGET_BRANCH} на GitHub!")
             
     except Exception as e:
         st.error(f"Не удалось загрузить данные с GitHub. Ошибка: {e}")
