@@ -486,7 +486,7 @@ with tab_main:
     # --- ШАГ 1 ---
     st.header("Шаг 1: Загрузка исходного MSDS (EN)")
     input_method = st.radio("Способ загрузки:", ("Загрузить файл (DOCX / PDF / TXT)", "Вставить текст вручную"), on_change=reset_state)
-
+    
     if input_method == "Вставить текст вручную":
         inserted_text = st.text_area("Вставьте текст MSDS на английском языке:", height=250, placeholder="SECTION 1: Identification...")
         if inserted_text:
@@ -494,7 +494,10 @@ with tab_main:
     else:
         uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
         if uploaded_file is not None:
-            st.session_state.file_name_output = f"{uploaded_file.name}_RU"
+            # Отсекаем расширение (берём всё, что до последней точки)
+            base_name = uploaded_file.name.rsplit('.', 1)[0]
+            st.session_state.file_name_output = f"{base_name}_RU"
+            
             if uploaded_file.name.endswith(".txt"):
                 st.session_state.raw_text = str(uploaded_file.read(), "utf-8")
             elif uploaded_file.name.endswith(".docx"):
@@ -502,11 +505,11 @@ with tab_main:
             elif uploaded_file.name.endswith(".pdf"):
                 with pdfplumber.open(io.BytesIO(uploaded_file.read())) as pdf:
                     st.session_state.raw_text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-
+    
     if st.session_state.raw_text:
         with st.expander("Просмотр извлеченного оригинального текста (Шаг 1)", expanded=False):
             st.text_area("Оригинал без изменений:", value=st.session_state.raw_text, height=200, disabled=True, key="raw_preview")
-
+    
     st.divider()
 
     # --- ШАГ 2 ---
