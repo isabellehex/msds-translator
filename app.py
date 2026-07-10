@@ -36,58 +36,47 @@ if "translated_text" not in st.session_state:
 if "current_glossary_cache" not in st.session_state:
     st.session_state.current_glossary_cache = {}
 
-def normalize_section_2_1(text_block: str) -> str:
-    """
-    Очищает и пересобирает хаотичный текст из пункта 2.1,
-    распознавая как новый формат (H-коды), так и старый (R-фразы).
-    """
-    lines = text_block.split('\n')
-    clean_lines = []
+def normalize_section_2_1(text: str) -> str:
+    if not text:
+        return ""
     
-    garbage_patterns = [
-        r'www\.\S+', 
-        r'\d{2}/\d{2}/\d{4}', 
-        r'\b\d+\s*/\s*\d+\b', 
-        r'(?i)safety\s+data\s+sheet',
-        r'(?i)formaldehyde\s+solution\s+ar/acs' # при необходимости расширяй список мусора
-    ]
+    # Разбиваем текст на отдельные строчки
+    lines = text.split('\n')
+    cleaned_lines = []
     
     for line in lines:
-        line_strip = line.strip()
-        if not line_strip:
+        line = line.strip()
+        if not line:
+            # Сохраняем пустые строки для красивого разделения абзацев
+            cleaned_lines.append("")
             continue
-        if any(re.search(p, line_strip) for p in garbage_patterns):
-            continue
-        clean_lines.append(line_strip)
-        
-    single_flow = " ".join(clean_lines)
-    result_rows = []
-    
-    has_h_codes = bool(re.search(r'\bH\d{3}\b', single_flow))
-    has_r_phrases = bool(re.search(r'\bR\d{2,}', single_flow))
-    
-    if has_h_codes:
-        pattern = r'(.*?\bH\d{3}\b.*?Category\s+\d+\w*(?:\s*,\s*[^A-Z]*)?)'
-        alt_pattern = r'(.*?Category\s+\d+\w*.*?\bH\d{3}\b)'
-        matches = re.findall(f'{pattern}|{alt_pattern}', single_flow)
-        for match in matches:
-            row = match[0] if match[0] else match[1]
-            if row:
-                result_rows.append(row.strip())
-    elif has_r_phrases:
-        pattern = r'(.*?\bR\d{2,}(?:\/\d{2,})*\b)'
-        matches = re.findall(pattern, single_flow)
-        for match in matches:
-            if match:
-                result_rows.append(match.strip())
-        full_text_msg = re.search(r'(Full text of.*)', single_flow)
-        if full_text_msg:
-            result_rows.append(full_text_msg.group(1).strip())
+            
+        if cleaned_lines:
+            last_line = cleaned_lines[-1].strip()
+            
+            # Условие для склейки: если предыдущая строка не пустая
+            # и НЕ заканчивается на точку, двоеточие или знак восклицания/вопроса
+            # и при этом текущая строка начинается с маленькой буквы
+            if (last_line and 
+                not last_line.endswith(('.', ':', '!', '?')) and 
+                line[0].islower()):
+                
+                # Если на конце был дефис переноса — убираем его, иначе добавляем пробел
+                if last_line.endswith('-'):
+                    cleaned_lines[-1] = cleaned_lines[-1][:-1] + line
+                else:
+                    cleaned_lines[-1] = cleaned_lines[-1] + " " + line
+                continue
 
-    if not result_rows:
-        return "\n".join(clean_lines)
+        cleaned_lines.append(line)
         
-    return "\n".join(result_rows)
+    # Собираем текст обратно с правильными переносами
+    result = "\n".join(cleaned_lines)
+    
+    # Убираем три и более переноса строки подряд, оставляя максимум два (пустую строку)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    
+    return result.strip()
 
 def reset_state():
     st.session_state.raw_text = ""
