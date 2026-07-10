@@ -11,6 +11,8 @@ from github import Github
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 # --- Настройка страницы ---
 st.set_page_config(
@@ -219,7 +221,7 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
         prompt = (
             "Ты — AI-модуль нормализации химической документации (ГОСТ 30333-2022).\n"
             "Переведи предоставленные ключи на русский язык.\n"
-            "ТРЕБОВАНИЕ: Верни строго валидный JSON-обэект, где ключ — оригинальная английская строка, а значение — русский перевод.\n"
+            "ТРЕБОВАНИЕ: Верни строго валидный JSON-объект, где ключ — оригинальная английская строка, а значение — русский перевод.\n"
             "Не пиши никаких вступлений или markdown-разметки. Только чистый JSON.\n\n"
             f"Шаблон для заполнения:\n{batch_json_placeholder}"
         )
