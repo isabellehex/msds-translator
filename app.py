@@ -36,6 +36,59 @@ if "translated_text" not in st.session_state:
 if "current_glossary_cache" not in st.session_state:
     st.session_state.current_glossary_cache = {}
 
+def normalize_section_2_1(text_block: str) -> str:
+    """
+    Очищает и пересобирает хаотичный текст из пункта 2.1,
+    распознавая как новый формат (H-коды), так и старый (R-фразы).
+    """
+    lines = text_block.split('\n')
+    clean_lines = []
+    
+    garbage_patterns = [
+        r'www\.\S+', 
+        r'\d{2}/\d{2}/\d{4}', 
+        r'\b\d+\s*/\s*\d+\b', 
+        r'(?i)safety\s+data\s+sheet',
+        r'(?i)formaldehyde\s+solution\s+ar/acs' # при необходимости расширяй список мусора
+    ]
+    
+    for line in lines:
+        line_strip = line.strip()
+        if not line_strip:
+            continue
+        if any(re.search(p, line_strip) for p in garbage_patterns):
+            continue
+        clean_lines.append(line_strip)
+        
+    single_flow = " ".join(clean_lines)
+    result_rows = []
+    
+    has_h_codes = bool(re.search(r'\bH\d{3}\b', single_flow))
+    has_r_phrases = bool(re.search(r'\bR\d{2,}', single_flow))
+    
+    if has_h_codes:
+        pattern = r'(.*?\bH\d{3}\b.*?Category\s+\d+\w*(?:\s*,\s*[^A-Z]*)?)'
+        alt_pattern = r'(.*?Category\s+\d+\w*.*?\bH\d{3}\b)'
+        matches = re.findall(f'{pattern}|{alt_pattern}', single_flow)
+        for match in matches:
+            row = match[0] if match[0] else match[1]
+            if row:
+                result_rows.append(row.strip())
+    elif has_r_phrases:
+        pattern = r'(.*?\bR\d{2,}(?:\/\d{2,})*\b)'
+        matches = re.findall(pattern, single_flow)
+        for match in matches:
+            if match:
+                result_rows.append(match.strip())
+        full_text_msg = re.search(r'(Full text of.*)', single_flow)
+        if full_text_msg:
+            result_rows.append(full_text_msg.group(1).strip())
+
+    if not result_rows:
+        return "\n".join(clean_lines)
+        
+    return "\n".join(result_rows)
+
 def reset_state():
     st.session_state.raw_text = ""
     st.session_state.original_raw_text = ""
@@ -207,6 +260,12 @@ with tab_main:
         if st.session_state.loaded_file_id != current_file_id:
             with st.spinner("Извлекаем текст, отрезаем лишнее и структурируем по разделам..."):
                 extracted = parse_uploaded_file(uploaded_file)
+                
+                # === ВОТ СЮДА МЫ ВСТАВЛЯЕМ НАШУ ФУНКЦИЮ НОРМАЛИЗАЦИИ ===
+                # Пропускаем извлеченный текст через очистку перед сохранением в стейт
+                extracted = normalize_section_2_1(extracted)
+                # ====================================================
+                
                 st.session_state.raw_text = extracted
                 st.session_state.original_raw_text = extracted 
                 st.session_state.loaded_file_id = current_file_id
