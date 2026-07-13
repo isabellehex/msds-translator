@@ -7,6 +7,7 @@ import os
 import zipfile
 import json
 import xml.etree.ElementTree as ET
+import github  # Изменено для нового формата Auth
 from github import Github
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
@@ -171,7 +172,9 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
         st.error("GitHub конфигурация не найдена в Secrets!")
         return {}
 
-    g = Github(github_token)
+    # Исправлено устаревание авторизации PyGithub
+    auth = github.Auth.Token(github_token)
+    g = Github(auth=auth)
     repo = g.get_repo(github_repo)
     file_path = "glossary.json"
     
@@ -412,7 +415,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
         p.paragraph_format.line_spacing = 1.15
         
         if cleaned_line.startswith('# '):
-            # 1. Удаляем маркер заголовка И полностью вырезаем любые звёздочки
             text_content = cleaned_line.replace('# ', '').replace('**', '').strip()
             run = p.add_run(text_content)
             run.bold = True
@@ -423,7 +425,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
             p.paragraph_format.space_after = Pt(6)
             
         elif cleaned_line.startswith('## '):
-            # 2. Удаляем маркер подраздела И полностью вырезаем любые звёздочки
             text_content = cleaned_line.replace('## ', '').replace('**', '').strip()
             run = p.add_run(text_content)
             run.bold = True  
@@ -437,7 +438,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
                 cleaned_line = cleaned_line.replace('- ', '', 1)
                 p.paragraph_format.left_indent = Inches(0.25)
             
-            # 3. Для обычного текста делим по звёздочкам, чтобы сделать нужные слова жирными
             parts = re.split(r'(\*\*.*?\*\*)', cleaned_line)
             for part in parts:
                 if part.startswith('**') and part.endswith('**'):
@@ -445,7 +445,6 @@ def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: s
                     run = p.add_run(bold_text)
                     run.bold = True
                 else:
-                    # Если звёздочка осталась «одинокой» или сломалась — вырезаем её из текста
                     clean_part = part.replace('**', '')
                     run = p.add_run(clean_part)
                 run.font.name = 'Arial'
@@ -466,14 +465,18 @@ def render_glossary_tab():
         return
 
     try:
-        g = Github(GITHUB_TOKEN)
+        # Исправлено устаревание авторизации PyGithub
+        auth = github.Auth.Token(GITHUB_TOKEN)
+        g = Github(auth=auth)
         repo = g.get_repo(GITHUB_REPO)
         contents = repo.get_contents("glossary.json", ref=TARGET_BRANCH)
         glossary_data = json.loads(contents.decoded_content.decode("utf-8"))
         
         data_list = [{"Оригинал (English)": k, "Перевод (Russian)": v} for k, v in glossary_data.items()]
         data_list.sort(key=lambda x: x["Оригинал (English)"].lower())
-        edited_df = st.data_editor(data_list, use_container_width=True, num_rows="dynamic")
+        
+        # Исправлено: use_container_width=True заменено на width='stretch'
+        edited_df = st.data_editor(data_list, width='stretch', num_rows="dynamic")
         
         if st.button("💾 Сохранить изменения в словаре", type="primary"):
             updated_dict = {row["Оригинал (English)"]: row["Перевод (Russian)"] for row in edited_df if row["Оригинал (English)"]}
@@ -528,7 +531,6 @@ with tab_main:
     else:
         uploaded_file = st.file_uploader("Выберите файл", type=["docx", "pdf", "txt"])
         if uploaded_file is not None:
-            # Отсекаем расширение (берём всё, что до последней точки)
             base_name = uploaded_file.name.rsplit('.', 1)[0]
             st.session_state.file_name_output = f"{base_name}_RU"
             
@@ -550,10 +552,10 @@ with tab_main:
     st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
     st.caption("Автоматически сверяется с глоссарием на GitHub, добавляет новые заголовки и выравнивает текст.")
 
-    if st.button("🔧 Запустить интеллектуальный анализ", type="secondary", use_container_width=True):
+    # Исправлено: use_container_width=True заменено на width='stretch'
+    if st.button("🔧 Запустить интеллектуальный анализ", type="secondary", width='stretch'):
         if st.session_state.raw_text:
             with st.spinner("Синхронизация с базой знаний Git и перевод неизвестных фраз..."):
-                # Находим новые фразы, шлем в YandexGPT только их, коммитим в указанную ветку
                 st.session_state.current_glossary_cache = get_and_update_glossary(
                     st.session_state.raw_text, 
                     FOLDER_ID, 
@@ -571,8 +573,8 @@ with tab_main:
     st.header("Шаг 3: Мгновенная сборка перевода из кэша (0 рублей)")
     st.caption("Документ собирается локально без повторных обращений к нейросети.")
 
-    if st.button("🚀 Собрать готовый документ", type="primary", use_container_width=True):
-        # Проверяем, запущен ли кэш в текущей сессии
+    # Исправлено: use_container_width=True заменено на width='stretch'
+    if st.button("🚀 Собрать готовый документ", type="primary", width='stretch'):
         if not st.session_state.current_glossary_cache:
             with st.spinner("Загрузка активного словаря..."):
                 st.session_state.current_glossary_cache = get_and_update_glossary(
@@ -581,7 +583,6 @@ with tab_main:
         
         if st.session_state.current_glossary_cache:
             with st.spinner("Локальная сборка ГОСТ-структуры..."):
-                # Собираем перевод за 1 секунду абсолютно бесплатно!
                 st.session_state.translated_text = assemble_translated_document(
                     st.session_state.raw_text, 
                     st.session_state.current_glossary_cache, 
@@ -603,12 +604,13 @@ with tab_main:
     if st.session_state.translated_text:
         if "Ошибка" not in st.session_state.translated_text:
             docx_data = make_formatted_docx(st.session_state.translated_text, product_name_ru, product_cas)
+            # Исправлено: use_container_width=True заменено на width='stretch'
             st.download_button(
                 label="Скачать отформатированный файл WORD (.docx)",
                 data=docx_data,
                 file_name=st.session_state.file_name_output if st.session_state.file_name_output.endswith(".docx") else f"{st.session_state.file_name_output}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
+                width='stretch'
             )
     else:
         st.info("Кнопка скачивания появится здесь, когда Шаг 3 будет успешно выполнен.")
