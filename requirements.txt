@@ -1,5 +1,7 @@
-streamlit
-openai
-python-docx
-pdfplumber
-PyGithub
+streamlit>=1.35.0
+openai>=1.20.0
+pydantic>=2.7.0
+pydantic_core>=2.18.0
+pdfplumber>=0.11.0
+PyGithub>=2.3.0
+python-docx>=1.1.2
