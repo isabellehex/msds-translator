@@ -7,10 +7,13 @@ import os
 import zipfile
 import json
 import xml.etree.ElementTree as ET
+import github
 from github import Github
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 # --- Настройка страницы ---
 st.set_page_config(
@@ -171,7 +174,9 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
         st.error("GitHub конфигурация не найдена в Secrets!")
         return {}
 
-    g = Github(github_token)
+    # Устраняем DeprecationWarning для PyGithub
+    auth_provider = github.Auth.Token(github_token)
+    g = Github(auth=auth_provider)
     repo = g.get_repo(github_repo)
     file_path = "glossary.json"
     
@@ -259,7 +264,8 @@ def get_and_update_glossary(raw_text: str, folder_id: str, api_key: str, github_
 def assemble_translated_document(text: str, glossary: dict, product_name_ru: str) -> str:
     """
     Финальная высокоточная сборка документа. 
-    Берет переводы из кэша, гарантирует совпадение ключей и наводит идеальную ГОСТ-верстку.
+    Берет переводы из кэша, гарантирует совпадение ключей, обрабатывает 
+    ручные маркеры склейки/переноса строк и наводит идеальную ГОСТ-верстку.
     """
     cleaned_lines = []
     seen_sections = set()
@@ -273,6 +279,9 @@ def assemble_translated_document(text: str, glossary: dict, product_name_ru: str
             return c_clean
         return glossary.get(c_clean, c_clean)
 
+    # Флаг-маркер: нужно ли принудительно склеить следующую строку со старой
+    merge_next = False
+
     for line in text.split('\n'):
         line_str = line.strip()
         if not line_str or any(sw in line_str.lower() for sw in stop_words):
@@ -283,6 +292,7 @@ def assemble_translated_document(text: str, glossary: dict, product_name_ru: str
             continue
 
         parsed = parse_line(line_str)
+        current_line = ""
         
         # 1. Сборка главных разделов
         if parsed["type"] == "section":
@@ -299,46 +309,67 @@ def assemble_translated_document(text: str, glossary: dict, product_name_ru: str
                 continue
             seen_sections.add(section_marker)
             
-            cleaned_lines.append(f"\n# {cleaned_title.upper()}")
+            current_line = f"\n# {cleaned_title.upper()}"
             
-        # 2. Сборка подразделов (1.1, 2.3.1, 4.2.2 и т.д.)
+        # 2. Сборка подразделов (1.1, 2.3.1, 4.2.2 и т.д.) - чистый Markdown без звёздочек
         elif parsed["type"] == "subsection":
             t_key = translate_chunk(parsed["key"])
             num_part = parsed["num"]
             
             if parsed["val"]:
                 t_val = translate_chunk(parsed["val"])
-                cleaned_lines.append(f"\n## {num_part} **{t_key}**: {t_val}")
+                current_line = f"\n## {num_part} {t_key}: {t_val}"
             else:
-                cleaned_lines.append(f"\n## {num_part} **{t_key}**")
+                current_line = f"\n## {num_part} {t_key}"
                 
         # 3. Сборка параметров "Ключ: Значение"
         elif parsed["type"] == "key_value":
             t_key = translate_chunk(parsed["key"])
             t_val = translate_chunk(parsed["val"])
             if t_key and t_val:
-                cleaned_lines.append(f"**{t_key}:** {t_val}")
+                current_line = f"**{t_key}:** {t_val}"
             elif t_key:
-                cleaned_lines.append(f"**{t_key}:**")
+                current_line = f"**{t_key}:**"
                 
         # 4. Сборка табличных строк в структурированную сетку
         elif parsed["type"] == "table_row":
             t_chunks = [translate_chunk(c) for c in parsed["chunks"]]
             row_str = " | ".join(t_chunks)
-            cleaned_lines.append(f"| {row_str} |")
+            current_line = f"| {row_str} |"
             
         # 5. Сборка обычного текста и списков
         elif parsed["type"] == "text":
             t_text = translate_chunk(parsed["text"])
             prefix = "- " if parsed["is_bullet"] else ""
-            cleaned_lines.append(f"{prefix}{t_text}")
+            current_line = f"{prefix}{t_text}"
+            
+        if not current_line:
+            continue
+
+        # --- ОБРАБОТКА МАРКЕРОВ ГЛОССАРИЯ ---
+        # 1. Замена как нативных переносов, так и текстовых "\n" на настоящие переводы строк
+        current_line = current_line.replace("\\n", "\n")
+
+        # 2. Поиск знака склейки "<<<" в конце переведённой строки
+        next_merge = False
+        if current_line.endswith("<<<"):
+            next_merge = True
+            current_line = current_line[:-3].rstrip()
+
+        # 3. Склеивание с предыдущей строкой при наличии активного флага merge_next
+        if merge_next and cleaned_lines:
+            last_line = cleaned_lines[-1]
+            # Стыкуем аккуратно, убирая лишние концевые пробелы и добавляя ровно один разделительный пробел
+            cleaned_lines[-1] = last_line.rstrip() + " " + current_line.lstrip()
+        else:
+            cleaned_lines.append(current_line)
+
+        # Передаем состояние флага склейки на следующую итерацию цикла
+        merge_next = next_merge
             
     final_markdown = '\n'.join(cleaned_lines)
     # Финальный штрих: глобально заменяем имя продукта на его официальное русское имя по ТЗ
     return re.sub(r'ТРИМЕТИЛОЛ\s*ПРОПАН|TRIMETHYLOL\s*PROPANE', product_name_ru, final_markdown, flags=re.IGNORECASE).strip()
-
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 
 def make_formatted_docx(markdown_text: str, product_name_ru: str, product_cas: str):
     """Сборщик Word-документа по ГОСТ-стилистике"""
@@ -466,14 +497,18 @@ def render_glossary_tab():
         return
 
     try:
-        g = Github(GITHUB_TOKEN)
+        # Устраняем DeprecationWarning для PyGithub
+        auth_provider = github.Auth.Token(GITHUB_TOKEN)
+        g = Github(auth=auth_provider)
         repo = g.get_repo(GITHUB_REPO)
         contents = repo.get_contents("glossary.json", ref=TARGET_BRANCH)
         glossary_data = json.loads(contents.decoded_content.decode("utf-8"))
         
         data_list = [{"Оригинал (English)": k, "Перевод (Russian)": v} for k, v in glossary_data.items()]
         data_list.sort(key=lambda x: x["Оригинал (English)"].lower())
-        edited_df = st.data_editor(data_list, use_container_width=True, num_rows="dynamic")
+        
+        # Исправляем use_container_width на width='stretch' по новому стандарту Streamlit
+        edited_df = st.data_editor(data_list, width="stretch", num_rows="dynamic")
         
         if st.button("💾 Сохранить изменения в словаре", type="primary"):
             updated_dict = {row["Оригинал (English)"]: row["Перевод (Russian)"] for row in edited_df if row["Оригинал (English)"]}
@@ -550,7 +585,8 @@ with tab_main:
     st.header("Шаг 2: Выравнивание и нормализация табличной структуры")
     st.caption("Автоматически сверяется с глоссарием на GitHub, добавляет новые заголовки и выравнивает текст.")
 
-    if st.button("🔧 Запустить интеллектуальный анализ", type="secondary", use_container_width=True):
+    # Исправляем use_container_width на width='stretch' по новому стандарту Streamlit
+    if st.button("🔧 Запустить интеллектуальный анализ", type="secondary", width="stretch"):
         if st.session_state.raw_text:
             with st.spinner("Синхронизация с базой знаний Git и перевод неизвестных фраз..."):
                 # Находим новые фразы, шлем в YandexGPT только их, коммитим в указанную ветку
@@ -571,7 +607,8 @@ with tab_main:
     st.header("Шаг 3: Мгновенная сборка перевода из кэша (0 рублей)")
     st.caption("Документ собирается локально без повторных обращений к нейросети.")
 
-    if st.button("🚀 Собрать готовый документ", type="primary", use_container_width=True):
+    # Исправляем use_container_width на width='stretch' по новому стандарту Streamlit
+    if st.button("🚀 Собрать готовый документ", type="primary", width="stretch"):
         # Проверяем, запущен ли кэш в текущей сессии
         if not st.session_state.current_glossary_cache:
             with st.spinner("Загрузка активного словаря..."):
@@ -608,7 +645,7 @@ with tab_main:
                 data=docx_data,
                 file_name=st.session_state.file_name_output if st.session_state.file_name_output.endswith(".docx") else f"{st.session_state.file_name_output}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
+                width="stretch"
             )
     else:
         st.info("Кнопка скачивания появится здесь, когда Шаг 3 будет успешно выполнен.")
