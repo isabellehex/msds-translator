@@ -2892,5 +2892,10 @@
     "№ ООН (IMDG)": "№ ООН (IMDG)",
     "№ООН(IMDG)": "№ ООН (IMDG)",
     "≈ 24000 g/mol": "≈ 24000 г/моль",
-    "≥ 0.0197 vol %": "≥ 0,0197 об. %"
+    "≥ 0.0197 vol %": "≥ 0,0197 об. %",
+    "UREA EXTRA PURE": "МОЧЕВИНА ЧЕТКАЯ",
+    "UREA EXTRA PURE MSDS": "ПАСПОРТ БЕЗОПАСНОСТИ МОЧЕВИНЫ ЧЕТКОЙ",
+    "UREA EXTRA PURE is not on the REACH Candidate List": "МОЧЕВИНА ЧЕТКАЯ НЕ ВКЛЮЧЕНА В СПИСОК КАНДИДАТОВ REACH",
+    "UREA EXTRA PURE (57-13-6)": "МОЧЕВИНА ЧЕТКАЯ (57-13-6)",
+    "UREA EXTRA PURE is not on the REACH Annex XIV List": "МОЧЕВИНА ЧЕТКАЯ НЕ ВКЛЮЧЕНА В СПИСОК ПРИЛОЖЕНИЯ XIV REACH"
 }
