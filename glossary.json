@@ -2888,5 +2888,9 @@
     "№ ООН (IMDG)": "№ ООН (IMDG)",
     "№ООН(IMDG)": "№ ООН (IMDG)",
     "≈ 24000 g/mol": "≈ 24000 г/моль",
-    "≥ 0.0197 vol %": "≥ 0,0197 об. %"
+    "≥ 0.0197 vol %": "≥ 0,0197 об. %",
+    "UREA MOLECULAR BIOLOGY GRADE (57-13-6)": "Мочевина для молекулярной биологии (57-13-6)",
+    "UREA MOLECULAR BIOLOGY GRADE is not on the REACH Candidate List": "Мочевина для молекулярной биологии не включена в Предварительный список REACH",
+    "UREA MOLECULAR BIOLOGY GRADE": "Мочевина для молекулярной биологии",
+    "UREA MOLECULAR BIOLOGY GRADE is not on the REACH Annex XIV List": "Мочевина для молекулярной биологии не включена в Приложение XIV к REACH"
 }
