@@ -1714,7 +1714,7 @@
     "Remove contact lenses, if present and easy to do. Continue rinsing": "Снимите контактные линзы, если они есть и их легко снять. Продолжайте промывание",
     "Remove contact lenses, if present and easy to do. Continue rinsing.": "Снимите контактные линзы, если они есть и если это легко сделать. Продолжайте промывание.",
     "Remove contact lenses, if present and easy to do. Continue rinsing. If eye irritation persists: Get medical advice/attention.": "Удалить контактные линзы, если они есть и это легко сделать. Продолжить промывание. Если раздражение глаз не проходит: обратиться за медицинской помощью/консультацией.",
-    "Remove contact lenses, if present and easy to do. Continue rinsing. Rinse cautiously": "Снимите контактные линзы, если они есть и их легко снять. Продолжайте промывку. Промывайте осторожно",
+    "Remove contact lenses, if present and easy to do. Continue rinsing. Rinse cautiously": "Снимите контактные линзы, если они есть и их легко снять. Продолжайте промывку. Промывайте осторожно с водой несколько минут.",
     "Remove contact lenses, if present and easy to do. Continue rinsing2.3.Other hazards2.3.Other hazards": "Снимите контактные линзы, если они есть и если это легко сделать. Продолжайте промывание. 2.3 Другие опасности 2.3 Другие опасности",
     "Remove ignition sources. No open flames. No smoking. Use special care to avoid static electric charges.": "Удалите источники воспламенения. Нет открытого огня. Не курить. Соблюдайте особые меры предосторожности, чтобы избежать статических электрических зарядов.",
     "Remove ignition sources. Use special care to avoid static electric charges. No naked": "Удалите источники воспламенения. Соблюдайте особые меры предосторожности, чтобы избежать статического электричества. ",
@@ -2170,6 +2170,10 @@
     "UREA AR is not on the REACH Annex XIV List": "UREA AR не входит в список Приложения XIV REACH",
     "UREA AR is not on the REACH Candidate List": "UREA AR не входит в предварительный список REACH",
     "UREA AR MSDS": "UREA AR паспорт безопасности материала",
+    "UREA MOLECULAR BIOLOGY GRADE": "Мочевина для молекулярной биологии",
+    "UREA MOLECULAR BIOLOGY GRADE (57-13-6)": "Мочевина для молекулярной биологии (57-13-6)",
+    "UREA MOLECULAR BIOLOGY GRADE is not on the REACH Annex XIV List": "Мочевина для молекулярной биологии не включена в Приложение XIV к REACH",
+    "UREA MOLECULAR BIOLOGY GRADE is not on the REACH Candidate List": "Мочевина для молекулярной биологии не включена в Предварительный список REACH",
     "Use ... to extinguish.": "Используйте ... для тушения.",
     "Use as laboratory reagent": "Использовать в качестве лабораторного реагента",
     "Use extinguishing measures that are appropriate to local circumstances and the surrounding environment. Immediately evacuate personnel to safe areas. Remove undamaged containers from fire area if it is safe to do so.": "Применять меры по тушению, соответствующие местным условиям и окружающей среде. Немедленно эвакуировать персонал в безопасные зоны. Если это безопасно, удалить неповреждённые контейнеры из зоны пожара.",
@@ -2888,9 +2892,5 @@
     "№ ООН (IMDG)": "№ ООН (IMDG)",
     "№ООН(IMDG)": "№ ООН (IMDG)",
     "≈ 24000 g/mol": "≈ 24000 г/моль",
-    "≥ 0.0197 vol %": "≥ 0,0197 об. %",
-    "UREA MOLECULAR BIOLOGY GRADE (57-13-6)": "Мочевина для молекулярной биологии (57-13-6)",
-    "UREA MOLECULAR BIOLOGY GRADE is not on the REACH Candidate List": "Мочевина для молекулярной биологии не включена в Предварительный список REACH",
-    "UREA MOLECULAR BIOLOGY GRADE": "Мочевина для молекулярной биологии",
-    "UREA MOLECULAR BIOLOGY GRADE is not on the REACH Annex XIV List": "Мочевина для молекулярной биологии не включена в Приложение XIV к REACH"
+    "≥ 0.0197 vol %": "≥ 0,0197 об. %"
 }
