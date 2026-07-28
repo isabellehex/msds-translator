@@ -3596,5 +3596,8 @@
     "POTASSIUM HYDROGEN PHTHALATE": "ГИДРОФТАЛАТ КАЛИЯ",
     "POTASSIUM HYDROGEN PHTHALATE EXTRA PURE is not on the REACH Candidate List": "ВЫСОКОЧИСТЫЙ ГИДРОФТАЛАТ КАЛИЯ не включён в Предварительный список REACH",
     "POTASSIUM HYDROGEN PHTHALATE EXTRA PURE is not on the REACH Annex XIV List": "ВЫСОКОЧИСТЫЙ ГИДРОФТАЛАТ КАЛИЯ не включён в Приложение XIV к REACH",
-    "EXTRA PURE MSDS": "Паспорт безопасности высокочистого вещества"
+    "EXTRA PURE MSDS": "Паспорт безопасности высокочистого вещества",
+    "POTASSIUM HYDROGEN PHTHALATE FOR HPLC": "Гидрогенфталат калия для ВЭЖХ",
+    "POTASSIUM HYDROGEN PHTHALATE FOR HPLC is not on the REACH Annex XIV List": "Гидрогенфталат калия для ВЭЖХ не включён в Приложение XIV к REACH",
+    "POTASSIUM HYDROGEN PHTHALATE FOR HPLC is not on the REACH Candidate List": "Гидрогенфталат калия для ВЭЖХ не включён в Предварительный список REACH"
 }
