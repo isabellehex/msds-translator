@@ -3590,5 +3590,11 @@
     "3.8 - 4.0 (5% aq, sol,)": "3,8 - 4,0 (5% водный раствор)",
     "Water: 80 g/l @ 20°C": "Вода: 80 г/л при 20°C",
     "POTASSIUM HYDROGEN PHTHALATE AR": "Гидрофталат калия AR",
-    "acidmonopotassium salt": "монокалиевая соль кислоты"
+    "acidmonopotassium salt": "монокалиевая соль кислоты",
+    "KHP / Potassium biphthalate / Potassium phthalate monobasic / Phthalic": "КГП / Бифталат калия / Моноосновный фталат калия / Фталевая",
+    "POTASSIUM HYDROGEN PHTHALATE EXTRA PURE": "ВЫСОКОЧИСТЫЙ ГИДРОФТАЛАТ КАЛИЯ",
+    "POTASSIUM HYDROGEN PHTHALATE": "ГИДРОФТАЛАТ КАЛИЯ",
+    "POTASSIUM HYDROGEN PHTHALATE EXTRA PURE is not on the REACH Candidate List": "ВЫСОКОЧИСТЫЙ ГИДРОФТАЛАТ КАЛИЯ не включён в Предварительный список REACH",
+    "POTASSIUM HYDROGEN PHTHALATE EXTRA PURE is not on the REACH Annex XIV List": "ВЫСОКОЧИСТЫЙ ГИДРОФТАЛАТ КАЛИЯ не включён в Приложение XIV к REACH",
+    "EXTRA PURE MSDS": "Паспорт безопасности высокочистого вещества"
 }
