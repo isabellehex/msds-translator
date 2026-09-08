@@ -7070,5 +7070,20 @@
     "7790-94-5 MSDS": "7790-94-5 Паспорт безопасности",
     "4WE": "4WE",
     "UN 1754 CHLOROSULPHONIC ACID, 8, I, (E) Transport document description (IMDG): UN 1754 CHLOROSULPHONIC ACID, 8, I Transport document description (IATA): UN 1754 Chlorosulphonic acid, 8": "UN 1754 ХЛОРОСУЛЬФОНОВАЯ КИСЛОТА, 8, I, (E) Описание транспортного документа (IMDG): UN 1754 ХЛОРОСУЛЬФОНОВАЯ КИСЛОТА, 8, I Описание транспортного документа (IATA): UN 1754 Хлоросульфоновая кислота, 8",
-    "CHLOROSULFONIC ACID FOR SYNTHESIS is listed SZW-lijst van mutagene stoffen: CHLOROSULFONIC ACID FOR SYNTHESIS is listed": "ХЛОРОСУЛЬФОНОВАЯ КИСЛОТА ДЛЯ СИНТЕЗА указана в списке SZW-lijst van mutagene stoffen: ХЛОРОСУЛЬФОНОВАЯ КИСЛОТА ДЛЯ СИНТЕЗА указана"
+    "CHLOROSULFONIC ACID FOR SYNTHESIS is listed SZW-lijst van mutagene stoffen: CHLOROSULFONIC ACID FOR SYNTHESIS is listed": "ХЛОРОСУЛЬФОНОВАЯ КИСЛОТА ДЛЯ СИНТЕЗА указана в списке SZW-lijst van mutagene stoffen: ХЛОРОСУЛЬФОНОВАЯ КИСЛОТА ДЛЯ СИНТЕЗА указана",
+    "H226 H301 H311 H331 H314 H317 H350 H410": "H226 H301 H311 H331 H314 H317 H350 H410 — Опасность воспламенения, токсичность при проглатывании, контакте с кожей или вдыхании, вызывает серьёзные ожоги кожи и повреждение глаз, может вызвать аллергическую реакцию кожи, может вызвать рак, токсично для водной среды с долгосрочными последствиями",
+    "No data available Melting point: -57 °C": "Нет доступных данных Точка плавления: -57 °C",
+    "Very toxic to aquatic life with long lasting effects": "Очень токсично для водной среды с долгосрочными последствиями",
+    "HYDRAZINE, AQUEOUS SOLUTION Proper Shipping Name (IMDG): HYDRAZINE, AQUEOUS SOLUTION Proper Shipping Name (IATA): HYDRAZINE, AQUEOUS SOLUTION Proper Shipping Name (ADN): Not regulated": "ГИДРАЗИН, ВОДНЫЙ РАСТВОР Правильное наименование для перевозки (IMDG): ГИДРАЗИН, ВОДНЫЙ РАСТВОР Правильное наименование для перевозки (IATA): ГИДРАЗИН, ВОДНЫЙ РАСТВОР Правильное наименование для перевозки (ADN): Не регулируется",
+    "H301+H311+H331 - Toxic if swallowed, in contact with skin or if inhaled H314 - Causes severe skin burns and eye damage": "H301+H311+H331 — Токсично при проглатывании, контакте с кожей или вдыхании H314 — Вызывает серьёзные ожоги кожи и повреждение глаз",
+    "C; R34 R43": "C; R34 R43 — Опасность коррозии, опасность раздражения кожи",
+    "N; R50/53 R10": "N; R50/53 R10 — Токсично для водной среды, опасность для окружающей среды",
+    "Skin corrosion/irritation, Category 1B Sensitisation — Skin, category 1 Carcinogenicity, Category 1A": "Коррозия/раздражение кожи, категория 1B Сенсибилизация — Кожа, категория 1 Канцерогенность, категория 1A",
+    "H317 - May cause an allergic skin reaction H350 - May cause cancer": "H317 — Может вызвать аллергическую реакцию кожи H350 — Может вызвать рак",
+    "Carc.Cat.1; R45 T; R23/24/25": "Канцероген. Категория 1; R45 T; R23/24/25 — Опасность смертельного исхода при проглатывании, вдыхании или контакте с кожей",
+    "CENTER or doctor/physician. Wash with plenty of soap and water. Wash contaminated clothing before reuse.": "Обратитесь в медицинский центр или к врачу. Промойте большим количеством мыла и воды. Постирайте загрязнённую одежду перед повторным использованием.",
+    "Handle empty containers with care because residual vapours are flammable. Precautions for safe handling: No naked lights. No smoking. Avoid contact with skin and eyes.": "Обращайтесь с пустыми контейнерами осторожно, так как остаточные пары воспламеняемы. Меры предосторожности при обращении: Нет открытого огня. Не курить. Избегать контакта с кожей и глазами.",
+    "Do not eat, drink or smoke when using this product. Wash contaminated clothing before reuse.": "Не есть, не пить и не курить при использовании этого продукта. Постирайте загрязнённую одежду перед повторным использованием.",
+    "HYDRAZINE HYDRATE FOR SYNTHESIS MSDS": "ГИДРАЗИН ГИДРАТ ДЛЯ СИНТЕЗА Паспорт безопасности материала",
+    "GHS02GHS05GHS06GHS08GHS09": "GHS02GHS05GHS06GHS08GHS09 — Знаки опасности по ГСС: воспламеняющиеся вещества, коррозионные вещества, токсичные вещества, опасные для окружающей среды вещества"
 }
