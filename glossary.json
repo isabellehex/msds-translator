@@ -2407,7 +2407,7 @@
     "Take off all contaminated clothing immediately. Wash off with plenty of water.": "Немедленно снимите всю загрязнённую одежду. Тщательно смойте водой.",
     "Take off immediately all contaminated": "Немедленно снимать всю загрязнённую",
     "Take off immediately all contaminated clothing. Immediately call a POISON": "Немедленно снимите всю загрязнённую одежду. Немедленно обратитесь в ТОКСИКОЛОГИЧЕСКИЙ ЦЕНТР",
-    "Take off immediately all contaminated clothing. Rinse skin with water/shower.": "Немедленно снять всю загрязнённую одежду. Промыть кожу водой/принять душ.",
+    "Take off immediately all contaminated clothing. Rinse skin with water/shower.": "Немедленно снимите всю загрязнённую одежду. Промойте кожу водой/примите душ.",
     "Take off immediately all contaminated clothing. Rinse skin with water/shower. If skin": "Немедленно снять всю загрязнённую одежду. Промыть кожу водой/принять душ. Если кожа",
     "Take precautionary measures against static discharge. Use explosion-proof equipment.": "Примите меры предосторожности против статического разряда. Используйте взрывозащищённое оборудование.",
     "Tank code (ADR)": "Код цистерны (ADR)",
@@ -5144,5 +5144,13 @@
     "TRIFLUOROACETIC ACID": "ТРИФТОРАЦЕТАТНАЯ КИСЛОТА",
     "Harmful to aquatic organisms, may cause long-term adverse effects in the aquatic environment": "Вреден для водных организмов, может вызывать долгосрочные неблагоприятные эффекты в водной среде",
     "TRIFLUOROACETIC ACID AR": "ТРИФТОРАЦЕТАТНАЯ КИСЛОТА AR",
-    "(CAS-No.) 76-05-1": "(CAS-No.) 76-05-1"
+    "(CAS-No.) 76-05-1": "(CAS-No.) 76-05-1",
+    "TRIFLUOROACETIC ACID FOR HPLC & UV SPECTROSCOPY MSDS": "ТРИФТОРАЦЕТАТНАЯ КИСЛОТА ДЛЯ ВЭЖХ И УФ СПЕКТРОСКОПИИ MSDS",
+    "TRIFLUOROACETIC ACID For HPLC & UV Spectroscopy": "ТРИФТОРАЦЕТАТНАЯ КИСЛОТА ДЛЯ ВЭЖХ И УФ СПЕКТРОСКОПИИ",
+    "TRIFLUOROACETIC ACID For HPLC & UV": "ТРИФТОРАЦЕТАТНАЯ КИСЛОТА ДЛЯ ВЭЖХ И УФ",
+    "Spectroscopy": "Спектроскопия",
+    "0349C": "0349C",
+    "TRIFLUOROACETIC ACID For HPLC & UV Spectroscopy (76-05-1)": "ТРИФТОРАЦЕТАТНАЯ КИСЛОТА ДЛЯ ВЭЖХ И УФ СПЕКТРОСКОПИИ (76-05-1)",
+    "TRIFLUOROACETIC ACID For HPLC & UV Spectroscopy is not on the REACH Candidate List": "ТРИФТОРАЦЕТАТНАЯ КИСЛОТА ДЛЯ ВЭЖХ И УФ СПЕКТРОСКОПИИ не включена в список кандидатов REACH",
+    "TRIFLUOROACETIC ACID For HPLC & UV Spectroscopy is not on the REACH Annex XIV List": "ТРИФТОРАЦЕТАТНАЯ КИСЛОТА ДЛЯ ВЭЖХ И УФ СПЕКТРОСКОПИИ не включена в список приложений XIV REACH"
 }
