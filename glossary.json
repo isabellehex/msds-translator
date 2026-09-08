@@ -7085,5 +7085,22 @@
     "Handle empty containers with care because residual vapours are flammable. Precautions for safe handling: No naked lights. No smoking. Avoid contact with skin and eyes.": "Обращайтесь с пустыми контейнерами осторожно, так как остаточные пары воспламеняемы. Меры предосторожности при обращении: Нет открытого огня. Не курить. Избегать контакта с кожей и глазами.",
     "Do not eat, drink or smoke when using this product. Wash contaminated clothing before reuse.": "Не есть, не пить и не курить при использовании этого продукта. Постирайте загрязнённую одежду перед повторным использованием.",
     "HYDRAZINE HYDRATE FOR SYNTHESIS MSDS": "ГИДРАЗИН ГИДРАТ ДЛЯ СИНТЕЗА Паспорт безопасности материала",
-    "GHS02GHS05GHS06GHS08GHS09": "GHS02GHS05GHS06GHS08GHS09 — Знаки опасности по ГСС: воспламеняющиеся вещества, коррозионные вещества, токсичные вещества, опасные для окружающей среды вещества"
+    "GHS02GHS05GHS06GHS08GHS09": "GHS02GHS05GHS06GHS08GHS09 — Знаки опасности по ГСС: воспламеняющиеся вещества, коррозионные вещества, токсичные вещества, опасные для окружающей среды вещества",
+    "H302 H330 H314 H373": "H302 H330 H314 H373 (требования безопасности)",
+    "P280 - Wear protective gloves/protective clothing/eye protection/face protection. P284 - Wear respiratory protection.": "P280 — Используйте защитные перчатки, защитную одежду, средства защиты глаз и лица. P284 — Используйте средства защиты органов дыхания.",
+    "Acute Tox. 1 (Inhalation)": "Острая токсичность 1 (при вдыхании)",
+    "Acute toxicity (inhal.), Category 1": "Острая токсичность (при вдыхании), категория 1",
+    "UN 1806 PHOSPHORUS PENTACHLORIDE, 8, II Transport document description (RID): UN 1806 PHOSPHORUS PENTACHLORIDE, 8, II": "UN 1806 ПЕНТАХЛОРИД ФОСФОРА, 8, II Описание транспортного документа (RID): UN 1806 ПЕНТАХЛОРИД ФОСФОРА, 8, II",
+    "UN 1806 PHOSPHORUS PENTACHLORIDE, 8, II, (E) Transport document description (IMDG): UN 1806 PHOSPHORUS PENTACHLORIDE, 8, II Transport document description (IATA): UN 1806 Phosphorus pentachloride, 8, II": "UN 1806 ПЕНТАХЛОРИД ФОСФОРА, 8, II, (E) Описание транспортного документа (IMDG): UN 1806 ПЕНТАХЛОРИД ФОСФОРА, 8, II Описание транспортного документа (IATA): UN 1806 пентахлорид фосфора, 8, II",
+    "Causes severe skin burns and eye damage. May cause damage to organs through prolonged or repeated exposure.": "Вызывает сильные ожоги кожи и повреждение глаз. Может вызвать повреждение органов при длительном или повторном воздействии.",
+    "T+; R26 Xn; R22 Xn; R48/20 C; R34 R14": "T+; R26 Xn; R22 Xn; R48/20 C; R34 R14 (классификация опасности)",
+    "(EC-No.) 233-060-3": "(Номер ЕС) 233-060-3",
+    "No data available9.2.Other information9.2.Other information": "Нет доступных данных9.2.Другая информация9.2.Другая информация",
+    "H314 - Causes severe skin burns and eye damage. H330 - Fatal if inhaled.": "H314 — Вызывает сильные ожоги кожи и повреждение глаз. H330 — Смертельно при вдыхании.",
+    "No data available Melting point: 179 - 181 °C": "Нет доступных данных Точка плавления: 179 - 181 °C",
+    "(CAS-No.) 10026-13-8": "(Номер CAS) 10026-13-8",
+    "PHOSPHORUS PENTACHLORIDE FOR SYNTHESIS MSDS": "ПЕНТАХЛОРИД ФОСФОРА ДЛЯ СИНТЕЗА Паспорт безопасности материала",
+    "Specific target organ toxicity — Repeated": "Специфическая токсичность для органов-мишеней — повторное воздействие",
+    "Fatal if inhaled. Symptoms/effects after ingestion: Harmful if swallowed.": "Смертельно при вдыхании. Симптомы/эффекты после проглатывания: вредно при проглатывании.",
+    "PHOSPHORUS PENTACHLORIDE Proper Shipping Name (RID): PHOSPHORUS PENTACHLORIDE": "ПЕНТАХЛОРИД ФОСФОРА Правильное наименование для перевозки (RID): ПЕНТАХЛОРИД ФОСФОРА"
 }
