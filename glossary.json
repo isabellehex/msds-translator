@@ -6321,5 +6321,13 @@
     "SECTION 14: Transport information In accordance with ADR / RID / IMDG / IATA / ADN": "РАЗДЕЛ 14: Информация о транспортировке В соответствии с ADR / RID / IMDG / IATA / ADN",
     "No naked lights. No smoking. Use only non-sparking tools. Do not breathe": "Нет открытого огня. Не курить. Использовать только неискрящие инструменты. Не вдыхать.",
     "VwVwS, Annex 3; WGK No 2218)": "VwVwS, Приложение 3; WGK № 2218)",
-    "110-18-9 MSDS": "110-18-9 Паспорт безопасности материала"
+    "110-18-9 MSDS": "110-18-9 Паспорт безопасности материала",
+    "H225 H302 H312 H332 H314": "H225 H302 H312 H332 H314 (перевод отсутствует, так как это коды опасности по ГОСТ, которые не переводятся)",
+    "UN 2248 DI-N-BUTYLAMINE, 8 (3), II Transport document description (RID): UN 2248 DI-n-BUTYLAMINE, 8 (3), II": "UN 2248 ДИ-Н-БУТИЛАМИН, 8 (3), II Описание транспортного документа (RID): UN 2248 ДИ-н-БУТИЛАМИН, 8 (3), II",
+    "Harmful in contact with skin. Symptoms/effects after ingestion: Harmful if swallowed.": "Вреден при контакте с кожей. Симптомы/эффекты после проглатывания: вреден при проглатывании.",
+    "Xn; R20/21/22 R10": "Xn; R20/21/22 R10 (перевод отсутствует, так как это коды опасности по ГОСТ, которые не переводятся)",
+    "discharge. Use only non-sparking tools. Keep away from sources of ignition - No smoking. Do not breathe vapours.": "Разгрузка. Используйте только инструменты, не дающие искр. Держите вдали от источников воспламенения — не курить. Не вдыхать пары.",
+    "Causes severe skin burns and eye damage. pH: 11.1 at 1 g/l at 20 °C": "Вызывает серьёзные ожоги кожи и повреждение глаз. pH: 11,1 при 1 г/л при 20 °C",
+    "UN 2248 DI-N-BUTYLAMINE, 8 (3), II, (D/E) Transport document description (IMDG): UN 2248 DI-n-BUTYLAMINE, 8 (3), II (39°C c.c.) Transport document description (IATA): UN 2248 Di-n-butylamine, 8 (3), II": "UN 2248 ДИ-Н-БУТИЛАМИН, 8 (3), II, (D/E) Описание транспортного документа (IMDG): UN 2248 ДИ-н-БУТИЛАМИН, 8 (3), II (39 °C т.к.) Описание транспортного документа (IATA): UN 2248 Ди-н-бутиламин, 8 (3), II",
+    "No data available Melting point: -62 °C": "Нет доступных данных Точка плавления: -62 °C"
 }
