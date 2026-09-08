@@ -5333,5 +5333,20 @@
     "CE8 Hazard identification number (RID): 60": "Номер идентификации опасности (RID): 60",
     "UN 2504 TETRABROMOETHANE, 6.1, III Transport document description (RID): UN 2504 TETRABROMOETHANE, 6.1, III": "UN 2504 тетрабромэтан, 6.1, III Описание транспортного документа (RID): UN 2504 тетрабромэтан, 6.1, III",
     "P260 - Do not breathe vapours, dust, fume, gas": "P260 — не вдыхать пары, пыль, дым, газ",
-    "> 1 Melting point: -1 °C": "Температура плавления: -1 °C"
+    "> 1 Melting point: -1 °C": "Температура плавления: -1 °C",
+    "Causes severe skin burns and eye damage. Symptoms/effects after skin contact: Toxic in contact with skin.": "Вызывает серьёзные ожоги кожи и повреждение глаз. Симптомы/эффекты после контакта с кожей: токсичен при контакте с кожей.",
+    "GHS02GHS05GHS06": "ГHS02ГHS05ГHS06",
+    "Causes severe skin burns and eye damage. pH: 2.5 at 100 g/l at 20 °C": "Вызывает серьёзные ожоги кожи и повреждение глаз. pH: 2,5 при 100 г/л при 20 °C",
+    "P280 - Wear protective gloves, protective clothing, eye protection, face protection. P303+P361+P353 - IF ON SKIN (or hair): Take off immediately all contaminated clothing. Rinse skin with water/shower.": "P280 — Надевайте защитные перчатки, защитную одежду, средства защиты глаз и лица. P303+P361+P353 — ПРИ ПОПАДАНИИ НА КОЖУ (или волосы): немедленно снимите всю загрязнённую одежду. Промойте кожу водой/примите душ.",
+    "H302 - Harmful if swallowed. H311 - Toxic in contact with skin.": "H302 — Вреден при проглатывании. H311 — Токсичен при контакте с кожей.",
+    "ISO-BUTYRIC ACID FOR SYNTHESIS MSDS": "ИСОБУТИРОВАЯ КИСЛОТА ДЛЯ СИНТЕЗА Паспорт безопасности материала",
+    "R10 <H226;H302;H311;H314>; Emergency management guidelines for the storage of flammable liquids must be followed": "R10 <H226;H302;H311;H314>; Необходимо соблюдать правила аварийного управления при хранении воспламеняющихся жидкостей",
+    "Ground/bond container and receiving equipment. Use explosion-proof electrical/ventilating/lighting equipment.": "Заземлите/соедините контейнер и приёмное оборудование. Используйте взрывозащищённое электрооборудование/вентиляцию/освещение.",
+    "H226 H302 H311 H314": "H226 H302 H311 H314",
+    "38 Orange plates:": "38 Оранжевые таблички:",
+    "UN 2529 ISOBUTYRIC ACID, 3 (8), III, (D/E) Transport document description (IMDG): UN 2529 ISOBUTYRIC ACID, 3 (8), III (55°C c.c.) Transport document description (IATA): UN 2529 Isobutyric acid, 3 (8), III": "UN 2529 ИСОБУТИРОВАЯ КИСЛОТА, 3 (8), III, (D/E) Описание транспортного документа (IMDG): UN 2529 ИСОБУТИРОВАЯ КИСЛОТА, 3 (8), III (55°C т.к.) Описание транспортного документа (IATA): UN 2529 Изобутировая кислота, 3 (8), III",
+    "% Miscible with water. Causes burns to skin and eyes. Irritating to skin, eyes and mucous membranes.": "% Смешивается с водой. Вызывает ожоги кожи и глаз. Раздражает кожу, глаза и слизистые оболочки.",
+    "UN 2529 ISOBUTYRIC ACID, 3 (8), III Transport document description (RID): UN 2529 ISOBUTYRIC ACID, 3 (8), III": "UN 2529 ИСОБУТИРОВАЯ КИСЛОТА, 3 (8), III Описание транспортного документа (RID): UN 2529 ИСОБУТИРОВАЯ КИСЛОТА, 3 (8), III",
+    "CE4 Hazard identification number (RID): 38": "CE4 Номер идентификации опасности (RID): 38",
+    "No data available Melting point: -47 °C": "Нет доступных данных Точка плавления: -47 °C"
 }
