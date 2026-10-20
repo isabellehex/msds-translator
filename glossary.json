@@ -1774,5 +1774,10 @@
     "Eye Dam. 1": "Повреждение глаз 1",
     "BENZOIC ACID EXTRA PURE MSDS": "Паспорт безопасности вещества бензойной кислоты экстра чистой",
     "H318": "H318",
-    "BENZOIC ACID EXTRA PURE (65-85-0)": "Бензойная кислота экстра чистая (65-85-0)"
+    "BENZOIC ACID EXTRA PURE (65-85-0)": "Бензойная кислота экстра чистая (65-85-0)",
+    "BENZOIC ACID AR/ACS is not on the REACH Annex XIV List": "Бензойная кислота AR/ACS не включена в Приложение XIV REACH",
+    "BENZOIC ACID AR/ACS (65-85-0)": "Бензойная кислота AR/ACS (65-85-0)",
+    "BENZOIC ACID AR/ACS": "Бензойная кислота AR/ACS",
+    "BENZOIC ACID AR/ACS is not on the REACH Candidate List": "Бензойная кислота AR/ACS не включена в Предварительный список REACH",
+    "BENZOIC ACID AR/ACS MSDS": "Паспорт безопасности вещества для бензойной кислоты AR/ACS"
 }
